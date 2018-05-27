@@ -1,3 +1,7 @@
+body {
+    font-family: "Roboto","Helvetica Neue",Helvetica,Arial,sans-serif;
+}
+
 #container {
     text-align: center;
     margin: 0 auto;
@@ -5,6 +9,62 @@
     width: 100%;
     overflow-x: auto;
     white-space: nowrap;
+}
+
+#toast {
+    background-color: transparent;
+    color: transparent;
+    display: none;
+}
+
+#toast.shown {
+    animation-duration: 5s;
+    animation-name: throb;
+    background-color: transparent;
+    display: block;
+    color: transparent;
+    text-align: center;
+    min-height: 2ex;
+    padding-top: 2ex;
+    padding-bottom: 1ex;
+    padding-left: 2em;
+    padding-right: 2em;
+    margin-top: 2ex;
+    box-shadow: 2px 2px 4px;
+}
+
+@keyframes fadeout {
+    from {
+        background-color: lightcoral;
+        color: black;
+    }
+
+    to {
+        background-color: transparent;
+        color: transparent;
+    }
+}
+
+@keyframes throb {
+    from {
+        background-color: transparent;
+        color: transparent;
+    }
+
+    5% {
+        background-color: lightcoral;
+        color: black;
+    }
+
+    90% {
+        background-color: lightcoral;
+        color: black;
+    }
+
+    to {
+        background-color: transparent;
+        color: transparent;
+    }
 }
 
 .row {
@@ -22,6 +82,10 @@
 .derivation.first {
     margin-left: 0;
     display: inline-block;
+}
+
+#container > .derivation {
+    padding: 0.5em;
 }
 
 .derivation {
@@ -62,6 +126,6 @@
     float: right;
     font-size: smaller;
     margin-right: -1.5em;
-    margin-top: -1.5ex;
+    margin-top: -1.2ex;
     color: darkgray;
 }

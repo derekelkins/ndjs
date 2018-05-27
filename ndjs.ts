@@ -1,6 +1,6 @@
 import { bind, wire } from "hyperhtml/esm";
 import { runEffects, tap } from "@most/core";
-import { click } from "@most/dom-event";
+import { click, domEvent } from "@most/dom-event";
 import { newDefaultScheduler } from "@most/scheduler";
 import { Set } from "immutable";
 import { cse } from "./json-with-sharing"
@@ -231,13 +231,14 @@ class Quantifier<V, P, C, Q, O, T extends GenericTerm<V, O>> implements GenericF
 
 /* Goals ************************************************************************************************************************************************************/
 
-interface GenericGoal<F extends ToJson> extends ToJson {
+interface GenericGoal<V, F extends ToJson & FreeVariables<V>> extends ToJson, FreeVariables<V> {
     match<A>(f: (premises: Array<F>, consequences: Array<F>) => A): A;
     readonly premises: Array<F>;
     readonly consequences: Array<F>;
 }
 
-class Goal<F extends ToJson> implements GenericGoal<F> {
+class Goal<V, F extends ToJson & FreeVariables<V>> implements GenericGoal<V, F> {
+    private freeVariablesCache: Set<V> | null = null;
     constructor(readonly premises: Array<F>, readonly consequences: Array<F>) {}
     match<A>(f: (premises: Array<F>, consequences: Array<F>) => A): A {
         return f(this.premises, this.consequences);
@@ -245,6 +246,15 @@ class Goal<F extends ToJson> implements GenericGoal<F> {
 
     toJson(): Json {
         return [this.premises.map(p => p.toJson()), this.consequences.map(c => c.toJson())];
+    }
+
+    freeVariables(): Set<V> {
+        if(this.freeVariablesCache !== null) return this.freeVariablesCache;
+        return this.freeVariablesCache = Set.union(this.premises.map(p => p.freeVariables()).concat(this.consequences.map(c => c.freeVariables())));
+    }
+
+    mapVariables(f: (v: V) => V): this {
+        return new Goal(this.premises.map(p => p.mapVariables(f)), this.consequences.map(c => c.mapVariables(f))) as this;
     }
 }
 
@@ -344,9 +354,11 @@ class InferenceExtender implements DerivationExtender {
 
 /* Rendering ********************************************************************************************************************************************************/
 
-type SimpleTerm = GenericTerm<string, string>;
-type SimpleFormula = GenericFormula<string, string, string, string, string, SimpleTerm>;
-type SimpleGoal = GenericGoal<SimpleFormula>;
+type Var = string;
+
+type SimpleTerm = GenericTerm<Var, string>;
+type SimpleFormula = GenericFormula<Var, string, string, string, string, SimpleTerm>;
+type SimpleGoal = GenericGoal<Var, SimpleFormula>;
 type SimpleDerivation = GenericDerivation<SimpleGoal>;
 
 function renderTerm(t: SimpleTerm): string {
@@ -361,46 +373,46 @@ function renderFormula(f: SimpleFormula, path: Path, inPremises: boolean, extend
     if(extender !== void(0)) {
         const extraData = {extender: extender, formula: f, inPremises: inPremises};
         return f.match(
-            (p, ...ts) => wire(f, id)`<div id="${id}" data=${extraData} class="formula topLevel">
-                                            <span class="predicate">${p}${ts.length === 0 ? '' : `(${ts.map(renderTerm).join(', ')})`}</span>
-                                      </div>`,
+            (p, ...ts) => wire(f, id)`<div id="${id}" data=${extraData} class="formula topLevel"><!--
+                                         --><span class="predicate">${p}${ts.length === 0 ? '' : `(${ts.map(renderTerm).join(', ')})`}</span><!--
+                                   --></div>`,
             c => wire(f, id)`<div id="${id}" data=${extraData} class="formula topLevel"><span class="connective nullary">${c}</span></div>`,
-            (c, f) => wire(f, id)`<div id="${id}" data=${extraData} class="formula topLevel">
-                                        <span class="connective unary">${c}</span>
-                                        ${renderFormula(f, path.extend(1), inPremises)}
-                                  </div>`,
-            (lf, c, rf) => wire(f, id)`<div id="${id}" data=${extraData} class="formula topLevel">
-                                            ${renderFormula(lf, path.extend(1), inPremises)}
-                                            <span class="connective binary">${c}</span>
-                                            ${renderFormula(rf, path.extend(2), inPremises)}
-                                       </div>`,
-            (q, v, f) => wire(f, id)`<div id="${id}" data=${extraData} class="formula topLevel quantifier">
-                                        <span class="connective quantifier">${q}</span>
-                                        <span class="boundVariable">${v}</span>
-                                        <span class="quantifierSeparator">.</span>
-                                        ${renderFormula(f, path.extend(1), inPremises)}
-                                     </div>`);
+            (c, f) => wire(f, id)`<div id="${id}" data=${extraData} class="formula topLevel"><!--
+                                     --><span class="connective unary">${c}</span>${
+                                        renderFormula(f, path.extend(1), inPremises)
+                                 }</div>`,
+            (lf, c, rf) => wire(f, id)`<div id="${id}" data=${extraData} class="formula topLevel">${
+                                            renderFormula(lf, path.extend(1), inPremises)
+                                           }<span class="connective binary">${c}</span>${
+                                            renderFormula(rf, path.extend(2), inPremises)
+                                      }</div>`,
+            (q, v, f) => wire(f, id)`<div id="${id}" data=${extraData} class="formula topLevel quantifier"><!--
+                                     --><span class="connective quantifier">${q}</span><!--
+                                     --><span class="boundVariable">${v}</span><!--
+                                     --><span class="quantifierSeparator">.</span>${
+                                        renderFormula(f, path.extend(1), inPremises)
+                                    }</div>`);
     } else {
         return f.match(
-            (p, ...ts) => wire(f, id)`<div id="${id}" class="formula">
-                                        <span class="predicate">${p}${ts.length === 0 ? '' : `(${ts.map(renderTerm).join(', ')})`}</span>
-                                      </div>`,
+            (p, ...ts) => wire(f, id)`<div id="${id}" class="formula"><!--
+                                     --><span class="predicate">${p}${ts.length === 0 ? '' : `(${ts.map(renderTerm).join(', ')})`}</span><!--
+                                   --></div>`,
             c => wire(f, id)`<div id="${id}" class="formula"><span class="connective nullary">${c}</span></div>`,
-            (c, f) => wire(f, id)`<div id="${id}" class="formula">(
-                                        <span class="connective unary">${c}</span>
-                                        ${renderFormula(f, path.extend(1), inPremises)}
-                                  )</div>`,
-            (lf, c, rf) => wire(f, id)`<div id="${id}" class="formula">(
-                                            ${renderFormula(lf, path.extend(1), inPremises)}
-                                            <span class="connective binary">${c}</span>
-                                            ${renderFormula(rf, path.extend(2), inPremises)}
-                                       )</div>`,
-            (q, v, f) => wire(f, id)`<div id="${id}" class="formula quantifier">(
-                                        <span class="connective quantifier">${q}</span>
-                                        <span class="boundVariable">${v}</span>
-                                        <span class="quantifierSeparator">.</span>
-                                        ${renderFormula(f, path.extend(1), inPremises)}
-                                     )</div>`);
+            (c, f) => wire(f, id)`<div id="${id}" class="formula">(<!--
+                                     --><span class="connective unary">${c}</span>r${
+                                        renderFormula(f, path.extend(1), inPremises)
+                                 })</div>`,
+            (lf, c, rf) => wire(f, id)`<div id="${id}" class="formula">(${
+                                            renderFormula(lf, path.extend(1), inPremises)
+                                           }<span class="connective binary">${c}</span>${
+                                            renderFormula(rf, path.extend(2), inPremises)
+                                      })</div>`,
+            (q, v, f) => wire(f, id)`<div id="${id}" class="formula quantifier">(<!--
+                                     --><span class="connective quantifier">${q}</span><!--
+                                     --><span class="boundVariable">${v}</span><!--
+                                     --><span class="quantifierSeparator">.</span>${
+                                        renderFormula(f, path.extend(1), inPremises)
+                                    })</div>`);
     }
 }
 
@@ -410,17 +422,17 @@ function renderGoal(g: SimpleGoal, path: Path, extender: DerivationExtender): El
         const psLen = ps.length;
         const psLenm1 = psLen - 1;
         const csLenm1 = cs.length - 1;
-        return wire(g, id)`<div id="${id}" class="goal">
-            ${wire(ps, id)`<div id="${id+"premises"}" class="premises context">
-                            ${ps.flatMap((p, i) => i === psLenm1 ? [renderFormula(p, path.extend(i), true, extender)] 
-                                                                 : [renderFormula(p, path.extend(i), true, extender), wire()`, `])}
-                       </div>`}
-            <span class="turnstile" data=${{extender: extender}}>⊢</span>
-            ${wire(cs, id)`<div id="${id+"consequences"}" class="consequences context">
-                            ${cs.flatMap((c, i) => i === csLenm1 ? [renderFormula(c, path.extend(i+psLen), false, extender)]
-                                                                 : [renderFormula(c, path.extend(i+psLen), false, extender), wire()`, `])}
-                       </div>`}
-            </div>`
+        return wire(g, id)`<div id="${id}" class="goal">${
+            wire(ps, id)`<div id="${id+"premises"}" class="premises context">${
+                          ps.flatMap((p, i) => i === psLenm1 ? [renderFormula(p, path.extend(i), true, extender)] 
+                                                             : [renderFormula(p, path.extend(i), true, extender), wire()`, `])
+                    }</div>`
+            }<span class="turnstile" data=${{extender: extender}}>⊢</span>${
+            wire(cs, id)`<div id="${id+"consequences"}" class="consequences context">${
+                            cs.flatMap((c, i) => i === csLenm1 ? [renderFormula(c, path.extend(i+psLen), false, extender)]
+                                                               : [renderFormula(c, path.extend(i+psLen), false, extender), wire()`, `])
+                       }</div>`
+            }</div>`
     });
 }
 
@@ -430,23 +442,22 @@ function renderDerivation(d: SimpleDerivation, path: Path, extender: DerivationE
     return d.match(
         c => wire(d, id)`<div id="${id}" class="${classes + ' open'}">${renderGoal(c, path/*TODO:extend(0)*/, extender)}</div>`,
         (n, ps, c) => 
-            wire(d, id)`<div id="${id}" class="${classes + ' closed'}">
-                            <div class="row rulePremise">
-                                ${ps.map((p, i) => {
-                                    const newExtender = new InferenceExtender(
-                                                                n,
-                                                                ps.slice(0, i),
-                                                                p.conclusion,
-                                                                ps.slice(i+1),
-                                                                extender);
+            wire(d, id)`<div id="${id}" class="${classes + ' closed'}"><!--
+                         --><div class="row rulePremise">${
+                                ps.map((p, i) => {
+                                  const newExtender = new InferenceExtender(
+                                                              n,
+                                                              ps.slice(0, i),
+                                                              p.conclusion,
+                                                              ps.slice(i+1),
+                                                              extender);
                                     return renderDerivation(p, path.extend(i), newExtender, i === 0);
-                                 })}
-                            </div>
-                            <div class="tag">${n}</div>
-                            <div class="row ruleConclusion">
-                                ${renderGoal(c, path.extend(ps.length), extender)}
-                            </div>
-                        </div>`);
+                                 })
+                            }</div><!--
+                         --><div class="tag">${n}</div><!--
+                         --><div class="row ruleConclusion">${
+                                renderGoal(c, path.extend(ps.length), extender)
+                            }</div></div>`);
 }
 
 /* Helpers **********************************************************************************************************************************************************/
@@ -457,34 +468,48 @@ const NOT_SYMBOL = '¬';
 const AND_SYMBOL = '∧';
 const OR_SYMBOL = '∨';
 const IMP_SYMBOL = '⇒';
+const FORALL_SYMBOL = '∀';
+const EXISTS_SYMBOL = '∃';
 
-const bot: SimpleFormula = new NullaryConnective<string, string, string, string, string, SimpleTerm>(BOT_SYMBOL);
-const top: SimpleFormula = new NullaryConnective<string, string, string, string, string, SimpleTerm>(TOP_SYMBOL);
+const bot: SimpleFormula = new NullaryConnective<Var, string, string, string, string, SimpleTerm>(BOT_SYMBOL);
+const top: SimpleFormula = new NullaryConnective<Var, string, string, string, string, SimpleTerm>(TOP_SYMBOL);
+
+function variable(v: Var): SimpleTerm {
+    return new Variable<Var, string>(v);
+}
 
 function predicate(p: string, ...ts: Array<SimpleTerm>): SimpleFormula {
-    return new Predicate<string, string, string, string, string, SimpleTerm>(p, ...ts);
+    return new Predicate<Var, string, string, string, string, SimpleTerm>(p, ...ts);
 }
 
 function not(f: SimpleFormula): SimpleFormula {
-    return new UnaryConnective<string, string, string, string, string, SimpleTerm>(NOT_SYMBOL, f);
+    return new UnaryConnective<Var, string, string, string, string, SimpleTerm>(NOT_SYMBOL, f);
 }
 
 function and(lf: SimpleFormula, rf: SimpleFormula): SimpleFormula {
-    return new BinaryConnective<string, string, string, string, string, SimpleTerm>(lf, AND_SYMBOL, rf);
+    return new BinaryConnective<Var, string, string, string, string, SimpleTerm>(lf, AND_SYMBOL, rf);
 }
 
 function or(lf: SimpleFormula, rf: SimpleFormula): SimpleFormula {
-    return new BinaryConnective<string, string, string, string, string, SimpleTerm>(lf, OR_SYMBOL, rf);
+    return new BinaryConnective<Var, string, string, string, string, SimpleTerm>(lf, OR_SYMBOL, rf);
 }
 
 function implies(lf: SimpleFormula, rf: SimpleFormula): SimpleFormula {
-    return new BinaryConnective<string, string, string, string, string, SimpleTerm>(lf, IMP_SYMBOL, rf);
+    return new BinaryConnective<Var, string, string, string, string, SimpleTerm>(lf, IMP_SYMBOL, rf);
+}
+
+function forall(v: Var, f: SimpleFormula): SimpleFormula {
+    return new Quantifier<Var, string, string, string, string, SimpleTerm>(FORALL_SYMBOL, v, f);
+}
+
+function exists(v: Var, f: SimpleFormula): SimpleFormula {
+    return new Quantifier<Var, string, string, string, string, SimpleTerm>(EXISTS_SYMBOL, v, f);
 }
 
 function open(conclusion: SimpleGoal): SimpleDerivation { return new OpenDerivation<SimpleGoal>(conclusion); }
 
-function entails(premises: Array<SimpleFormula>, consequences: Array<SimpleFormula>): Goal<SimpleFormula> {
-    return new Goal<SimpleFormula>(premises, consequences);
+function entails(premises: Array<SimpleFormula>, consequences: Array<SimpleFormula>): Goal<Var, SimpleFormula> {
+    return new Goal<Var, SimpleFormula>(premises, consequences);
 }
 
 function infers(name: string, premises: Array<SimpleDerivation>, conclusion: SimpleGoal): Inference<SimpleGoal> {
@@ -532,26 +557,25 @@ class Instantiate implements InputEvent {
 
 interface OutputEvent {
     match<A>(
-        failedCase: () => A,
+        failedCase: (message: string) => A,
         newGoalsCase: (name: string, goals: Array<SimpleGoal>) => A,
         contractOrInstantiateCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean) => A): A;
 }
 
 class Failed implements OutputEvent {
-    static INSTANCE = new Failed();
-    private constructor() {}
+    constructor(readonly message: string) {}
     match<A>(
-      failedCase: () => A,
+      failedCase: (message: string) => A,
       newGoalsCase: (name: string, goals: Array<SimpleGoal>) => A,
       contractOrInstantiateCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean) => A): A {
-        return failedCase();
+        return failedCase(this.message);
     }
 }
 
 class NewGoals implements OutputEvent {
     constructor(readonly name: string, readonly goals: Array<SimpleGoal>) {}
     match<A>(
-      failedCase: () => A,
+      failedCase: (message: string) => A,
       newGoalsCase: (name: string, goals: Array<SimpleGoal>) => A,
       contractOrInstantiateCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean) => A): A {
         return newGoalsCase(this.name, this.goals);
@@ -561,7 +585,7 @@ class NewGoals implements OutputEvent {
 class ContractOrInstantiate implements OutputEvent {
     constructor(readonly goal: SimpleGoal, readonly formula: SimpleFormula, readonly inPremises: boolean) {}
     match<A>(
-      failedCase: () => A,
+      failedCase: (message: string) => A,
       newGoalsCase: (name: string, goals: Array<SimpleGoal>) => A,
       contractOrInstantiateCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean) => A): A {
         return contractOrInstantiateCase(this.goal, this.formula, this.inPremises);
@@ -573,19 +597,19 @@ class ContractOrInstantiate implements OutputEvent {
 type Logic = (input: InputEvent) => OutputEvent;
 
 const classicalSequentCalculus: Logic = (input) => input.match(
-    (goal, formula, inPremises) => formula.match( // TODO: Refactor and finish.
+    (goal, formula, inPremises) => formula.match<OutputEvent>( // TODO: Refactor and finish.
         (predicate, ...terms) => { 
             if(inPremises) {
                 if(goal.consequences.some(c => c.matches(predicate, terms))) {
                     return new NewGoals('Ax', []);
                 } else {
-                    return Failed.INSTANCE;
+                    return new Failed('Formula not found in conclusions.');
                 }
             } else {
                 if(goal.premises.some(c => c.matches(predicate, terms))) {
                     return new NewGoals('Ax', []);
                 } else {
-                    return Failed.INSTANCE;
+                    return new Failed('Formula not found in premises.');
                 }
             }
         },
@@ -649,7 +673,25 @@ const classicalSequentCalculus: Logic = (input) => input.match(
                     throw 'Not implemented.'; 
             }
         },
-        (quantifier, v, formula) => { throw 'Not implemented yet.'; }),
+        (quantifier, v, f2) => { 
+            switch(quantifier) {
+                // TODO: Variable renaming shenanigans should occur here-ish.
+                case FORALL_SYMBOL:
+                    if(inPremises) {
+                        return new ContractOrInstantiate(goal, formula, inPremises);
+                    } else {
+                        return new NewGoals('∀R', [new Goal(goal.premises, goal.consequences.filter(f => f !== formula).concat(f2))]);
+                    }
+                case EXISTS_SYMBOL:
+                    if(inPremises) {
+                        return new NewGoals('∃L', [new Goal(goal.premises.filter(f => f !== formula).concat(f2), goal.consequences)]);
+                    } else {
+                        return new ContractOrInstantiate(goal, formula, inPremises);
+                    }
+                default:
+                    throw 'Not implemented yet.'; 
+            }
+        }),
     (goal, formula, inPremises) => {
         if(inPremises) {
             return new NewGoals('CL', [new Goal(goal.premises, goal.consequences.concat(formula))]);
@@ -657,7 +699,16 @@ const classicalSequentCalculus: Logic = (input) => input.match(
             return new NewGoals('CR', [new Goal(goal.premises.concat(formula), goal.consequences)]);
         }
     },
-    (goal, formula, inPremises, term) => { throw 'Not implemented yet.'; });
+    (goal, formula, inPremises, term) => { 
+        if(!(formula instanceof Quantifier)) throw 'Non quantified expression not expected.';
+
+        if(inPremises) { // then forall case
+        
+        } else { // exists case
+        
+        }
+        throw 'Not implemented yet.';
+    });
 
 /* Main *************************************************************************************************************************************************************/
 
@@ -665,8 +716,11 @@ const A = predicate('A');
 const B = predicate('B');
 
 let example: SimpleDerivation = open(entails([], [implies(implies(implies(A, B), A), A)]));
+//let example: SimpleDerivation = open(entails([], [forall('x', forall('y', predicate('P', variable('x'), variable('y'))))]));
 
 const container = document.getElementById('container');
+const toast = document.getElementById('toast');
+if(toast === null) throw 'Toast missing.';
 if(container === null) throw 'Container missing.';
 
 const refresh = () => {
@@ -688,13 +742,22 @@ const onClick = (event: MouseEvent) => {
     } else {
         const output = classicalSequentCalculus(new ApplyTactic(extraData.extender.goal, extraData.formula, extraData.inPremises!!));
         example = output.match(
-            () => example,
+            (message) => {
+                toast.textContent = message;
+                toast.className = 'shown';
+                return example;
+            },
             (name, goals) => extraData.extender.extend(name, goals.map(g => new OpenDerivation(g))),
             (goal, formula, inPremises) => { throw 'Not implemented yet.'; }); // TODO
     }
     refresh();
 };
 
+const onAnimationEnd = (event: Event) => {
+    toast.className = '';
+};
+
 runEffects(tap(onClick, click(container, true)), newDefaultScheduler());
+runEffects(tap(onAnimationEnd, domEvent('animationend', toast, false)), newDefaultScheduler());
 
 refresh();
