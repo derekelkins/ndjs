@@ -79,13 +79,24 @@ body {
     display: inline-block;
 }
 
+.occurrence {
+    font-style: italic;
+}
+
+.boundVariable {
+    font-style: italic;
+}
+
 .derivation.first {
     margin-left: 0;
     display: inline-block;
 }
 
 #container > .derivation {
-    padding: 0.5em;
+    padding-top: 1em;
+    padding-bottom: 0.5em;
+    padding-left: 2em;
+    padding-right: 2em;
 }
 
 .derivation {
@@ -100,6 +111,11 @@ body {
 
 .derivation.closed > .ruleConclusion {
     border-top: 1px solid black;
+}
+
+.turnstile {
+    margin-left: 0.1em;
+    margin-right: 0.1em;
 }
 
 .derivation.closed > .ruleConclusion .turnstile:hover {

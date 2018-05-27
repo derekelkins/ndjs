@@ -305,7 +305,8 @@ interface Path {
 }
 
 class StartPath implements Path {
-    constructor(private readonly start: string) {}
+    private readonly start: string;
+    constructor(s: string) { this.start = ':'+s; }
     extend(branch: number): Path {
         return new ExtendPath(branch, this);
     }
@@ -361,10 +362,12 @@ type SimpleFormula = GenericFormula<Var, string, string, string, string, SimpleT
 type SimpleGoal = GenericGoal<Var, SimpleFormula>;
 type SimpleDerivation = GenericDerivation<SimpleGoal>;
 
-function renderTerm(t: SimpleTerm): string {
-    return t.match<string>(
-        v => v,
-        (o, ...ts) => `${o}(${ts.map(renderTerm).join(', ')})`);
+function renderTerm(t: SimpleTerm): Element {
+    return t.match(
+        v => wire()`<span class="occurrence">${v}</span>`,
+        (o, ...ts) => wire()`<span class="operator">${o}</span>${ts.length === 0 ? '' : '('}${
+                                ts.flatMap((t, i) => i+1 === ts.length ? [renderTerm(t)] : [renderTerm(t), wire()`, `])
+                             }${ts.length === 0 ? '' : ')'}`);
 }
 
 // TODO: Add precedence system.
@@ -374,8 +377,11 @@ function renderFormula(f: SimpleFormula, path: Path, inPremises: boolean, extend
         const extraData = {extender: extender, formula: f, inPremises: inPremises};
         return f.match(
             (p, ...ts) => wire(f, id)`<div id="${id}" data=${extraData} class="formula topLevel"><!--
-                                         --><span class="predicate">${p}${ts.length === 0 ? '' : `(${ts.map(renderTerm).join(', ')})`}</span><!--
-                                   --></div>`,
+                                         --><span class="predicate"><span class="predicateSymbol">${p}</span>${
+                                                ts.length === 0 ? '' : '('}${
+                                                ts.flatMap((t, i) => i+1 === ts.length ? [renderTerm(t)]
+                                                                                       : [renderTerm(t), wire()`, `])
+                                           }${ts.length === 0 ? '' : ')'}</span></div>`,
             c => wire(f, id)`<div id="${id}" data=${extraData} class="formula topLevel"><span class="connective nullary">${c}</span></div>`,
             (c, f) => wire(f, id)`<div id="${id}" data=${extraData} class="formula topLevel"><!--
                                      --><span class="connective unary">${c}</span>${
@@ -395,8 +401,11 @@ function renderFormula(f: SimpleFormula, path: Path, inPremises: boolean, extend
     } else {
         return f.match(
             (p, ...ts) => wire(f, id)`<div id="${id}" class="formula"><!--
-                                     --><span class="predicate">${p}${ts.length === 0 ? '' : `(${ts.map(renderTerm).join(', ')})`}</span><!--
-                                   --></div>`,
+                                         --><span class="predicate"><span class="predicateSymbol">${p}</span>${
+                                                ts.length === 0 ? '' : '('}${
+                                                ts.flatMap((t, i) => i+1 === ts.length ? [renderTerm(t)]
+                                                                                       : [renderTerm(t), wire()`, `])
+                                           }${ts.length === 0 ? '' : ')'}</span></div>`,
             c => wire(f, id)`<div id="${id}" class="formula"><span class="connective nullary">${c}</span></div>`,
             (c, f) => wire(f, id)`<div id="${id}" class="formula">(<!--
                                      --><span class="connective unary">${c}</span>r${
@@ -689,7 +698,7 @@ const classicalSequentCalculus: Logic = (input) => input.match(
                         return new ContractOrInstantiate(goal, formula, inPremises);
                     }
                 default:
-                    throw 'Not implemented yet.'; 
+                    throw 'Not implemented.'; 
             }
         }),
     (goal, formula, inPremises) => {
@@ -700,7 +709,7 @@ const classicalSequentCalculus: Logic = (input) => input.match(
         }
     },
     (goal, formula, inPremises, term) => { 
-        if(!(formula instanceof Quantifier)) throw 'Non quantified expression not expected.';
+        if(!(formula instanceof Quantifier)) throw 'Non-quantified expression not expected.';
 
         if(inPremises) { // then forall case
         
@@ -716,7 +725,7 @@ const A = predicate('A');
 const B = predicate('B');
 
 let example: SimpleDerivation = open(entails([], [implies(implies(implies(A, B), A), A)]));
-//let example: SimpleDerivation = open(entails([], [forall('x', forall('y', predicate('P', variable('x'), variable('y'))))]));
+//let example: SimpleDerivation = open(entails([exists('x', forall('y', predicate('P', variable('x'), variable('y'))))], [forall('x', exists('y', predicate('P', variable('x'), variable('y'))))]));
 
 const container = document.getElementById('container');
 const toast = document.getElementById('toast');
@@ -725,7 +734,7 @@ if(container === null) throw 'Container missing.';
 
 const refresh = () => {
     location.hash = '#'+encodeURIComponent(JSON.stringify(cse(example.toJson())));
-    bind(container)`${renderDerivation(example, new StartPath(':root.'), new GoalExtender(example.conclusion), true, true)}`; // NOTE: StartPath MUST start with colon.
+    bind(container)`${renderDerivation(example, new StartPath('root.'), new GoalExtender(example.conclusion), true, true)}`;
 };
 
 const onClick = (event: MouseEvent) => {
