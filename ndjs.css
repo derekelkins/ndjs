@@ -1,0 +1,52 @@
+#container {
+    text-align: center;
+    margin: 0 auto;
+    width: 100%;
+}
+
+.row {
+    width: 100%;
+}
+
+.formula {
+    display: inline-block;
+}
+
+.context {
+    display: inline-block;
+}
+
+.derivation.first {
+    margin-left: 0;
+    display: inline-block;
+}
+
+.derivation {
+    margin-left: 2em;
+    display: inline-block;
+    cursor: default;
+}
+
+.derivation.closed > .ruleConclusion {
+    border-top: 1px solid black;
+}
+
+.derivation.closed > .ruleConclusion .turnstile:hover {
+    background-color: lightcoral;
+    cursor: pointer;
+}
+
+.derivation .formula.topLevel:hover {
+    background-color: skyblue;
+    cursor: pointer;
+}
+
+.derivation .formula.topLevel:hover > .connective {
+    color: white;
+    background-color: black;
+    cursor: pointer;
+}
+
+.derivation .formula.topLevel > .connective:hover {
+    cursor: pointer;
+}

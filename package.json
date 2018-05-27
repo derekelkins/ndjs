@@ -1,0 +1,41 @@
+{
+  "name": "ndjs",
+  "version": "1.0.0",
+  "description": "",
+  "main": "ndjs.js",
+  "dependencies": {
+    "@most/core": "^1.3.0",
+    "@most/dom-event": "^2.0.0",
+    "@most/scheduler": "^1.2.0",
+    "hyperhtml": "^2.10.1",
+    "immutable": "^4.0.0-rc.9"
+  },
+  "devDependencies": {
+    "@types/jest": "^22.2.0",
+    "jest": "^22.4.2",
+    "ts-jest": "^22.3.1",
+    "typedoc": "^0.11.1",
+    "typescript": "^2.8.3"
+  },
+  "scripts": {
+    "test": "jest"
+  },
+  "author": "Derek Elkins",
+  "license": "BSD-3-Clause",
+  "jest": {
+    "transform": {
+      "^.+\\.tsx?$": "<rootDir>/node_modules/ts-jest/preprocessor.js"
+    },
+    "modulePathIgnorePatterns": [
+      "<rootDir>/docs/"
+    ],
+    "testRegex": "(/__test__/.*|\\.(test|spec))\\.(tsx?|jsx?)$",
+    "moduleFileExtensions": [
+      "ts",
+      "tsx",
+      "js",
+      "jsx",
+      "json"
+    ]
+  }
+}
