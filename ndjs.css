@@ -1,7 +1,10 @@
 #container {
     text-align: center;
     margin: 0 auto;
+    padding-top: 2em;
     width: 100%;
+    overflow-x: auto;
+    white-space: nowrap;
 }
 
 .row {
@@ -27,6 +30,10 @@
     cursor: default;
 }
 
+.derivation.completed {
+    background-color: lightgreen;
+}
+
 .derivation.closed > .ruleConclusion {
     border-top: 1px solid black;
 }
@@ -49,4 +56,12 @@
 
 .derivation .formula.topLevel > .connective:hover {
     cursor: pointer;
+}
+
+.tag {
+    float: right;
+    font-size: smaller;
+    margin-right: -1.5em;
+    margin-top: -1.5ex;
+    color: darkgray;
 }

@@ -20,6 +20,7 @@ interface FreeVariables<V> {
 interface GenericTerm<V, O> extends ToJson, FreeVariables<V> {
     match<A>(variableCase: (v: V) => A,
              operatorCase: (operator: O, ...terms: Array<GenericTerm<V, O>>) => A): A;
+    equals(other: GenericTerm<V, O>): boolean;
 }
 
 class Variable<V, O> implements GenericTerm<V, O> {
@@ -38,6 +39,12 @@ class Variable<V, O> implements GenericTerm<V, O> {
 
     mapVariables(f: (v: V) => V): this {
         return new Variable(f(this.variable)) as this;
+    }
+
+    equals(other: GenericTerm<V, O>): boolean {
+        return other.match(
+                    v => v === this.variable,
+                    _ => false);
     }
 }
 
@@ -59,30 +66,38 @@ class Operator<V, O> implements GenericTerm<V, O> {
     mapVariables(f: (v: V) => V): this {
         return new Operator(this.operator, ...this.terms.map(t => t.mapVariables(f))) as this;
     }
+
+    equals(other: GenericTerm<V, O>): boolean {
+        return other.match(
+                    v => false,
+                    (o, ...ts) => o === this.operator 
+                               && this.terms.length === ts.length
+                               && ts.every((t, i) => t.equals(this.terms[i])));
+    }
 }
 
 // TODO: Make a Term parser.
-// TODO: Structural equality.
 // TODO: fromJson
 
 /* Formulas *********************************************************************************************************************************************************/
 
-interface GenericFormula<V, P, C, Q, T extends ToJson & FreeVariables<V>> extends ToJson, FreeVariables<V> {
+interface GenericFormula<V, P, C, Q, O, T extends GenericTerm<V, O>> extends ToJson, FreeVariables<V> {
     match<A>(predicateCase: (predicate: P, ...terms: Array<T>) => A,
              nullaryCase: (connective: C) => A,
-             unaryCase: (connective: C, formula: GenericFormula<V, P, C, Q, T>) => A,
-             binaryCase: (leftFormula: GenericFormula<V, P, C, Q, T>, connective: C, rightFormula: GenericFormula<V, P, C, Q, T>) => A,
-             quantifierCase: (quantifier: Q, v: V, formula: GenericFormula<V, P, C, Q, T>) => A): A;
+             unaryCase: (connective: C, formula: GenericFormula<V, P, C, Q, O, T>) => A,
+             binaryCase: (leftFormula: GenericFormula<V, P, C, Q, O, T>, connective: C, rightFormula: GenericFormula<V, P, C, Q, O, T>) => A,
+             quantifierCase: (quantifier: Q, v: V, formula: GenericFormula<V, P, C, Q, O, T>) => A): A;
+    matches(predicate: P, terms: Array<T>): boolean;
 }
 
-class Predicate<V, P, C, Q, T extends ToJson & FreeVariables<V>> implements GenericFormula<V, P, C, Q, T> {
+class Predicate<V, P, C, Q, O, T extends GenericTerm<V, O>> implements GenericFormula<V, P, C, Q, O, T> {
     readonly terms: Array<T>;
     constructor(readonly predicate: P, ...ts: Array<T>) { this.terms = ts; }
     match<A>(predicateCase: (predicate: P, ...terms: Array<T>) => A,
              nullaryCase: (connective: C) => A,
-             unaryCase: (connective: C, formula: GenericFormula<V, P, C, Q, T>) => A,
-             binaryCase: (leftFormula: GenericFormula<V, P, C, Q, T>, connective: C, rightFormula: GenericFormula<V, P, C, Q, T>) => A,
-             quantifierCase: (quantifier: Q, v: V, formula: GenericFormula<V, P, C, Q, T>) => A): A {
+             unaryCase: (connective: C, formula: GenericFormula<V, P, C, Q, O, T>) => A,
+             binaryCase: (leftFormula: GenericFormula<V, P, C, Q, O, T>, connective: C, rightFormula: GenericFormula<V, P, C, Q, O, T>) => A,
+             quantifierCase: (quantifier: Q, v: V, formula: GenericFormula<V, P, C, Q, O, T>) => A): A {
         return predicateCase(this.predicate, ...this.terms);
     }
 
@@ -97,15 +112,21 @@ class Predicate<V, P, C, Q, T extends ToJson & FreeVariables<V>> implements Gene
     mapVariables(f: (v: V) => V): this {
         return new Predicate(this.predicate, ...this.terms.map(t => t.mapVariables(f))) as this;
     }
+
+    matches(predicate: P, terms: Array<T>): boolean { 
+        return this.predicate === predicate
+            && this.terms.length === terms.length
+            && terms.every((t, i) => t.equals(this.terms[i]));
+    }
 }
 
-class NullaryConnective<V, P, C, Q, T extends ToJson & FreeVariables<V>> implements GenericFormula<V, P, C, Q, T> {
+class NullaryConnective<V, P, C, Q, O, T extends GenericTerm<V, O>> implements GenericFormula<V, P, C, Q, O, T> {
     constructor(readonly connective: C) { }
     match<A>(predicateCase: (predicate: P, ...terms: Array<T>) => A,
              nullaryCase: (connective: C) => A,
-             unaryCase: (connective: C, formula: GenericFormula<V, P, C, Q, T>) => A,
-             binaryCase: (leftFormula: GenericFormula<V, P, C, Q, T>, connective: C, rightFormula: GenericFormula<V, P, C, Q, T>) => A,
-             quantifierCase: (quantifier: Q, v: V, formula: GenericFormula<V, P, C, Q, T>) => A): A {
+             unaryCase: (connective: C, formula: GenericFormula<V, P, C, Q, O, T>) => A,
+             binaryCase: (leftFormula: GenericFormula<V, P, C, Q, O, T>, connective: C, rightFormula: GenericFormula<V, P, C, Q, O, T>) => A,
+             quantifierCase: (quantifier: Q, v: V, formula: GenericFormula<V, P, C, Q, O, T>) => A): A {
         return nullaryCase(this.connective);
     }
 
@@ -118,15 +139,17 @@ class NullaryConnective<V, P, C, Q, T extends ToJson & FreeVariables<V>> impleme
     }
 
     mapVariables(f: (v: V) => V): this { return this; }
+
+    matches(predicate: P, terms: Array<T>): boolean { return false; }
 }
 
-class UnaryConnective<V, P, C, Q, T extends ToJson & FreeVariables<V>> implements GenericFormula<V, P, C, Q, T> {
-    constructor(readonly connective: C, readonly formula: GenericFormula<V, P, C, Q , T>) { }
+class UnaryConnective<V, P, C, Q, O, T extends GenericTerm<V, O>> implements GenericFormula<V, P, C, Q, O, T> {
+    constructor(readonly connective: C, readonly formula: GenericFormula<V, P, C, Q , O, T>) { }
     match<A>(predicateCase: (predicate: P, ...terms: Array<T>) => A,
              nullaryCase: (connective: C) => A,
-             unaryCase: (connective: C, formula: GenericFormula<V, P, C, Q, T>) => A,
-             binaryCase: (leftFormula: GenericFormula<V, P, C, Q, T>, connective: C, rightFormula: GenericFormula<V, P, C, Q, T>) => A,
-             quantifierCase: (quantifier: Q, v: V, formula: GenericFormula<V, P, C, Q, T>) => A): A {
+             unaryCase: (connective: C, formula: GenericFormula<V, P, C, Q, O, T>) => A,
+             binaryCase: (leftFormula: GenericFormula<V, P, C, Q, O, T>, connective: C, rightFormula: GenericFormula<V, P, C, Q, O, T>) => A,
+             quantifierCase: (quantifier: Q, v: V, formula: GenericFormula<V, P, C, Q, O, T>) => A): A {
         return unaryCase(this.connective, this.formula);
     }
 
@@ -141,15 +164,17 @@ class UnaryConnective<V, P, C, Q, T extends ToJson & FreeVariables<V>> implement
     mapVariables(f: (v: V) => V): this {
         return new UnaryConnective(this.connective, this.formula.mapVariables(f)) as this;
     }
+
+    matches(predicate: P, terms: Array<T>): boolean { return false; }
 }
 
-class BinaryConnective<V, P, C, Q, T extends ToJson & FreeVariables<V>> implements GenericFormula<V, P, C, Q, T> {
-    constructor(readonly leftFormula: GenericFormula<V, P, C, Q, T>, readonly connective: C, readonly rightFormula: GenericFormula<V, P, C, Q , T>) { }
+class BinaryConnective<V, P, C, Q, O, T extends GenericTerm<V, O>> implements GenericFormula<V, P, C, Q, O, T> {
+    constructor(readonly leftFormula: GenericFormula<V, P, C, Q, O, T>, readonly connective: C, readonly rightFormula: GenericFormula<V, P, C, Q, O, T>) { }
     match<A>(predicateCase: (predicate: P, ...terms: Array<T>) => A,
              nullaryCase: (connective: C) => A,
-             unaryCase: (connective: C, formula: GenericFormula<V, P, C, Q, T>) => A,
-             binaryCase: (leftFormula: GenericFormula<V, P, C, Q, T>, connective: C, rightFormula: GenericFormula<V, P, C, Q, T>) => A,
-             quantifierCase: (quantifier: Q, v: V, formula: GenericFormula<V, P, C, Q, T>) => A): A {
+             unaryCase: (connective: C, formula: GenericFormula<V, P, C, Q, O, T>) => A,
+             binaryCase: (leftFormula: GenericFormula<V, P, C, Q, O, T>, connective: C, rightFormula: GenericFormula<V, P, C, Q, O, T>) => A,
+             quantifierCase: (quantifier: Q, v: V, formula: GenericFormula<V, P, C, Q, O, T>) => A): A {
         return binaryCase(this.leftFormula, this.connective, this.rightFormula);
     }
 
@@ -164,15 +189,17 @@ class BinaryConnective<V, P, C, Q, T extends ToJson & FreeVariables<V>> implemen
     mapVariables(f: (v: V) => V): this {
         return new BinaryConnective(this.leftFormula.mapVariables(f), this.connective, this.rightFormula.mapVariables(f)) as this;
     }
+
+    matches(predicate: P, terms: Array<T>): boolean { return false; }
 }
 
-class Quantifier<V, P, C, Q, T extends ToJson & FreeVariables<V>> implements GenericFormula<V, P, C, Q, T> {
-    constructor(readonly quantifier: Q, readonly variable: V, readonly formula: GenericFormula<V, P, C, Q, T>) {}
+class Quantifier<V, P, C, Q, O, T extends GenericTerm<V, O>> implements GenericFormula<V, P, C, Q, O, T> {
+    constructor(readonly quantifier: Q, readonly variable: V, readonly formula: GenericFormula<V, P, C, Q, O, T>) {}
     match<A>(predicateCase: (predicate: P, ...terms: Array<T>) => A,
              nullaryCase: (connective: C) => A,
-             unaryCase: (connective: C, formula: GenericFormula<V, P, C, Q, T>) => A,
-             binaryCase: (leftFormula: GenericFormula<V, P, C, Q, T>, connective: C, rightFormula: GenericFormula<V, P, C, Q, T>) => A,
-             quantifierCase: (quantifier: Q, v: V, formula: GenericFormula<V, P, C, Q, T>) => A): A {
+             unaryCase: (connective: C, formula: GenericFormula<V, P, C, Q, O, T>) => A,
+             binaryCase: (leftFormula: GenericFormula<V, P, C, Q, O, T>, connective: C, rightFormula: GenericFormula<V, P, C, Q, O, T>) => A,
+             quantifierCase: (quantifier: Q, v: V, formula: GenericFormula<V, P, C, Q, O, T>) => A): A {
         return quantifierCase(this.quantifier, this.variable, this.formula);
     }
 
@@ -187,6 +214,8 @@ class Quantifier<V, P, C, Q, T extends ToJson & FreeVariables<V>> implements Gen
     mapVariables(f: (v: V) => V): this {
         return new Quantifier(this.quantifier, f(this.variable), this.formula.mapVariables(f)) as this;
     }
+
+    matches(predicate: P, terms: Array<T>): boolean { return false; }
 }
 
 // TODO: fromJson
@@ -215,30 +244,36 @@ class Goal<F extends ToJson> implements GenericGoal<F> {
 /* Derivations ******************************************************************************************************************************************************/
 
 interface GenericDerivation<G extends ToJson> extends ToJson {
-    match<A>(openCase: (conclusion: G) => A, inferenceCase: (premises: Array<GenericDerivation<G>>, conclusion: G) => A): A;
+    match<A>(openCase: (conclusion: G) => A, inferenceCase: (name: string, premises: Array<GenericDerivation<G>>, conclusion: G) => A): A;
     conclusion: G;
+    isCompleted(): boolean;
 }
 
 class OpenDerivation<G extends ToJson> implements GenericDerivation<G> {
     constructor(readonly conclusion:  G) {}
-    match<A>(openCase: (conclusion: G) => A, inferenceCase: (premises: Array<GenericDerivation<G>>, conclusion: G) => A): A {
+    match<A>(openCase: (conclusion: G) => A, inferenceCase: (name: string, premises: Array<GenericDerivation<G>>, conclusion: G) => A): A {
         return openCase(this.conclusion);
     }
 
     toJson(): Json {
         return {conclusion: this.conclusion.toJson()};
     }
+
+    isCompleted(): boolean { return false; }
 }
 
+// TODO: Add name.
 class Inference<G extends ToJson> implements GenericDerivation<G> {
-    constructor(readonly premises: Array<GenericDerivation<G>>, readonly conclusion: G) {}
-    match<A>(openCase: (conclusion: G) => A, inferenceCase: (premises: Array<GenericDerivation<G>>, conclusion: G) => A): A {
-        return inferenceCase(this.premises, this.conclusion);
+    constructor(readonly name: string, readonly premises: Array<GenericDerivation<G>>, readonly conclusion: G) {}
+    match<A>(openCase: (conclusion: G) => A, inferenceCase: (name: string, premises: Array<GenericDerivation<G>>, conclusion: G) => A): A {
+        return inferenceCase(this.name, this.premises, this.conclusion);
     }
 
     toJson(): Json {
-        return {conclusion: this.conclusion.toJson(), premises: this.premises.map(p => p.toJson())};
+        return {name: this.name, conclusion: this.conclusion.toJson(), premises: this.premises.map(p => p.toJson())};
     }
+
+    isCompleted(): boolean { return this.premises.every(p => p.isCompleted()); }
 }
 
 // TODO: fromJson
@@ -272,35 +307,36 @@ class ExtendPath implements Path {
 /* DerivationExtender ***********************************************************************************************************************************************/
 
 interface DerivationExtender {
-    extend(premises: Array<SimpleDerivation>): SimpleDerivation;
+    extend(name: string, premises: Array<SimpleDerivation>): SimpleDerivation;
     open(): SimpleDerivation;
     goal: SimpleGoal;
 }
 
 class GoalExtender implements DerivationExtender {
     constructor(readonly goal: SimpleGoal) {}
-    extend(premises: Array<SimpleDerivation>): SimpleDerivation { return new Inference(premises, this.goal); }
+    extend(name: string, premises: Array<SimpleDerivation>): SimpleDerivation { return new Inference(name, premises, this.goal); }
     open(): SimpleDerivation { return new OpenDerivation(this.goal); }
 }
 
 class InferenceExtender implements DerivationExtender {
     constructor(
+        private readonly name: string,
         private readonly left: Array<SimpleDerivation>,
         readonly goal: SimpleGoal,
         private readonly right: Array<SimpleDerivation>,
         private readonly extender: DerivationExtender) {}
-    extend(premises: Array<SimpleDerivation>): SimpleDerivation {
-        return this.extender.extend(this.left.concat(new Inference(premises, this.goal), this.right));
+    extend(name: string, premises: Array<SimpleDerivation>): SimpleDerivation {
+        return this.extender.extend(this.name, this.left.concat(new Inference(name, premises, this.goal), this.right));
     }
     open(): SimpleDerivation {
-        return this.extender.extend(this.left.concat(new OpenDerivation(this.goal), this.right));
+        return this.extender.extend(this.name, this.left.concat(new OpenDerivation(this.goal), this.right));
     }
 }
 
 /* Rendering ********************************************************************************************************************************************************/
 
 type SimpleTerm = GenericTerm<string, string>;
-type SimpleFormula = GenericFormula<string, string, string, string, SimpleTerm>;
+type SimpleFormula = GenericFormula<string, string, string, string, string, SimpleTerm>;
 type SimpleGoal = GenericGoal<SimpleFormula>;
 type SimpleDerivation = GenericDerivation<SimpleGoal>;
 
@@ -379,16 +415,17 @@ function renderGoal(g: SimpleGoal, path: Path, extender: DerivationExtender): El
     });
 }
 
-function renderDerivation(d: SimpleDerivation, path: Path, extender: DerivationExtender, first: boolean = true): Element {
+function renderDerivation(d: SimpleDerivation, path: Path, extender: DerivationExtender, first: boolean = true, root: boolean = false): Element {
     const id = path.toString();
-    const classes = first ? "derivation first" : "derivation";
+    const classes = (first ? 'derivation first' : 'derivation') + (root && d.isCompleted() ? ' completed' : '');
     return d.match(
         c => wire(d, id)`<div id="${id}" class="${classes + ' open'}">${renderGoal(c, path, extender)}</div>`,
-        (ps, c) => 
+        (n, ps, c) => 
             wire(d, id)`<div id="${id}" class="${classes + ' closed'}">
                             <div class="row rulePremise">
                                 ${ps.map((p, i) => {
                                     const newExtender = new InferenceExtender(
+                                                                n,
                                                                 ps.slice(0, i),
                                                                 p.conclusion,
                                                                 ps.slice(i+1),
@@ -396,6 +433,7 @@ function renderDerivation(d: SimpleDerivation, path: Path, extender: DerivationE
                                     return renderDerivation(p, path.extend(i), newExtender, i === 0);
                                  })}
                             </div>
+                            <div class="tag">${n}</div>
                             <div class="row ruleConclusion">
                                 ${renderGoal(c, path, extender)}
                             </div>
@@ -411,23 +449,27 @@ const AND_SYMBOL = '∧';
 const OR_SYMBOL = '∨';
 const IMP_SYMBOL = '⇒';
 
-const bot: SimpleFormula = new NullaryConnective<string, string, string, string, SimpleTerm>(BOT_SYMBOL);
-const top: SimpleFormula = new NullaryConnective<string, string, string, string, SimpleTerm>(TOP_SYMBOL);
+const bot: SimpleFormula = new NullaryConnective<string, string, string, string, string, SimpleTerm>(BOT_SYMBOL);
+const top: SimpleFormula = new NullaryConnective<string, string, string, string, string, SimpleTerm>(TOP_SYMBOL);
+
+function predicate(p: string, ...ts: Array<SimpleTerm>): SimpleFormula {
+    return new Predicate<string, string, string, string, string, SimpleTerm>(p, ...ts);
+}
 
 function not(f: SimpleFormula): SimpleFormula {
-    return new UnaryConnective<string, string, string, string, SimpleTerm>(NOT_SYMBOL, f);
+    return new UnaryConnective<string, string, string, string, string, SimpleTerm>(NOT_SYMBOL, f);
 }
 
 function and(lf: SimpleFormula, rf: SimpleFormula): SimpleFormula {
-    return new BinaryConnective<string, string, string, string, SimpleTerm>(lf, AND_SYMBOL, rf);
+    return new BinaryConnective<string, string, string, string, string, SimpleTerm>(lf, AND_SYMBOL, rf);
 }
 
 function or(lf: SimpleFormula, rf: SimpleFormula): SimpleFormula {
-    return new BinaryConnective<string, string, string, string, SimpleTerm>(lf, OR_SYMBOL, rf);
+    return new BinaryConnective<string, string, string, string, string, SimpleTerm>(lf, OR_SYMBOL, rf);
 }
 
 function implies(lf: SimpleFormula, rf: SimpleFormula): SimpleFormula {
-    return new BinaryConnective<string, string, string, string, SimpleTerm>(lf, IMP_SYMBOL, rf);
+    return new BinaryConnective<string, string, string, string, string, SimpleTerm>(lf, IMP_SYMBOL, rf);
 }
 
 function open(conclusion: SimpleGoal): SimpleDerivation { return new OpenDerivation<SimpleGoal>(conclusion); }
@@ -436,8 +478,8 @@ function entails(premises: Array<SimpleFormula>, consequences: Array<SimpleFormu
     return new Goal<SimpleFormula>(premises, consequences);
 }
 
-function infers(premises: Array<SimpleDerivation>, conclusion: SimpleGoal): Inference<SimpleGoal> {
-    return new Inference<SimpleGoal>(premises, conclusion);
+function infers(name: string, premises: Array<SimpleDerivation>, conclusion: SimpleGoal): Inference<SimpleGoal> {
+    return new Inference<SimpleGoal>(name, premises, conclusion);
 }
 
 /* Events ***********************************************************************************************************************************************************/
@@ -481,23 +523,37 @@ class Instantiate implements InputEvent {
 
 interface OutputEvent {
     match<A>(
-        newGoalsCase: (goals: Array<SimpleGoal>) => A,
+        failedCase: () => A,
+        newGoalsCase: (name: string, goals: Array<SimpleGoal>) => A,
         contractOrInstantiateCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean) => A): A;
 }
 
-class NewGoals implements OutputEvent {
-    constructor(readonly goals: Array<SimpleGoal>) {}
+class Failed implements OutputEvent {
+    static INSTANCE = new Failed();
+    private constructor() {}
     match<A>(
-      newGoalsCase: (goals: Array<SimpleGoal>) => A,
+      failedCase: () => A,
+      newGoalsCase: (name: string, goals: Array<SimpleGoal>) => A,
       contractOrInstantiateCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean) => A): A {
-        return newGoalsCase(this.goals);
+        return failedCase();
+    }
+}
+
+class NewGoals implements OutputEvent {
+    constructor(readonly name: string, readonly goals: Array<SimpleGoal>) {}
+    match<A>(
+      failedCase: () => A,
+      newGoalsCase: (name: string, goals: Array<SimpleGoal>) => A,
+      contractOrInstantiateCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean) => A): A {
+        return newGoalsCase(this.name, this.goals);
     }
 }
 
 class ContractOrInstantiate implements OutputEvent {
     constructor(readonly goal: SimpleGoal, readonly formula: SimpleFormula, readonly inPremises: boolean) {}
     match<A>(
-      newGoalsCase: (goals: Array<SimpleGoal>) => A,
+      failedCase: () => A,
+      newGoalsCase: (name: string, goals: Array<SimpleGoal>) => A,
       contractOrInstantiateCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean) => A): A {
         return contractOrInstantiateCase(this.goal, this.formula, this.inPremises);
     }
@@ -509,47 +565,112 @@ type Logic = (input: InputEvent) => OutputEvent;
 
 const classicalSequentCalculus: Logic = (input) => input.match(
     (goal, formula, inPremises) => formula.match( // TODO: Refactor and finish.
-        (predicate, ...terms) => { throw 'Not implemented yet.'; },
-        connective => { throw 'Not implemented yet.'; },
-        (connective, formula) => { throw 'Not implemented yet.'; },
+        (predicate, ...terms) => { 
+            if(inPremises) {
+                if(goal.consequences.some(c => c.matches(predicate, terms))) {
+                    return new NewGoals('Ax', []);
+                } else {
+                    return Failed.INSTANCE;
+                }
+            } else {
+                if(goal.premises.some(c => c.matches(predicate, terms))) {
+                    return new NewGoals('Ax', []);
+                } else {
+                    return Failed.INSTANCE;
+                }
+            }
+        },
+        connective => { 
+            switch(connective) {
+                case TOP_SYMBOL:
+                    if(inPremises) {
+                        return new NewGoals('⊤L', [new Goal(goal.premises.filter(f => f !== formula), goal.consequences)]);
+                    } else {
+                        return new NewGoals('⊤R', []);
+                    }
+                case BOT_SYMBOL:
+                    if(inPremises) {
+                        return new NewGoals('⊥L', []);
+                    } else {
+                        return new NewGoals('⊥R', [new Goal(goal.premises, goal.consequences.filter(f => f !== formula))]);
+                    }
+                default:
+                    throw 'Not implemented.'; 
+            }
+        },
+        (connective, f2) => { 
+            switch(connective) {
+                case NOT_SYMBOL:
+                    if(inPremises) {
+                        return new NewGoals('¬L', [new Goal(goal.premises.filter(f => f !== formula), goal.consequences.concat(f2))]);
+                    } else {
+                        return new NewGoals('¬R', [new Goal(goal.premises.concat(f2), goal.consequences.filter(f => f !== formula))]);
+                    }
+                default:
+                    throw 'Not implemented.';
+            }
+        },
         (lf, connective, rf) => { 
             switch(connective) {
                 case AND_SYMBOL:
-                    if(inPremises) { // TODO: Remove old formula.
-                        return new NewGoals([new Goal(goal.premises.filter(f => f !== formula).concat(lf,rf), goal.consequences)]);
+                    if(inPremises) {
+                        return new NewGoals('∧L', [new Goal(goal.premises.filter(f => f !== formula).concat(lf,rf), goal.consequences)]);
                     } else {
                         const cs = goal.consequences.filter(f => f !== formula);
-                        return new NewGoals([new Goal(goal.premises, cs.concat(lf)),
+                        return new NewGoals('∧R', [new Goal(goal.premises, cs.concat(lf)),
                                              new Goal(goal.premises, cs.concat(rf))]);
                     }
+                case OR_SYMBOL:
+                    if(inPremises) {
+                        const ps = goal.premises.filter(f => f !== formula);
+                        return new NewGoals('∨L', [new Goal(ps.concat(lf), goal.consequences),
+                                             new Goal(ps.concat(rf), goal.consequences)]);
+                    } else {
+                        return new NewGoals('∨R', [new Goal(goal.premises, goal.consequences.filter(f => f !== formula).concat(lf,rf))]);
+                    }
+                case IMP_SYMBOL:
+                    if(inPremises) {
+                        const ps = goal.premises.filter(f => f !== formula);
+                        return new NewGoals('⇒L', [new Goal(ps, goal.consequences.concat(lf)),
+                                             new Goal(ps.concat(rf), goal.consequences)]);
+                    } else {
+                        return new NewGoals('⇒R', [new Goal(goal.premises.concat(lf), goal.consequences.filter(f => f !== formula).concat(rf))]);
+                    }
                 default: 
-                    throw 'Not implemented yet.'; 
+                    throw 'Not implemented.'; 
             }
         },
         (quantifier, v, formula) => { throw 'Not implemented yet.'; }),
-    (goal, formula, inPremises) => new NewGoals([inPremises ? new Goal(goal.premises, goal.consequences.concat(formula))
-                                                            : new Goal(goal.premises.concat(formula), goal.consequences)]),
+    (goal, formula, inPremises) => {
+        if(inPremises) {
+            return new NewGoals('CL', [new Goal(goal.premises, goal.consequences.concat(formula))]);
+        } else {
+            return new NewGoals('CR', [new Goal(goal.premises.concat(formula), goal.consequences)]);
+        }
+    },
     (goal, formula, inPremises, term) => { throw 'Not implemented yet.'; });
 
 /* Main *************************************************************************************************************************************************************/
 
-const A = new Predicate<string, string, string, string, SimpleTerm>('A'); 
-const B = new Predicate<string, string, string, string, SimpleTerm>('B'); 
+const A = predicate('A');
+const B = predicate('B');
 
-let example: SimpleDerivation = infers([open(entails([A,B], [not(A)])), infers([], entails([A,B], [B]))], entails([A, B], [and(A, B)]));
+let example: SimpleDerivation = open(entails([A,B], [and(A, B)]));
 
 const container = document.getElementById('container');
 if(container === null) throw 'Container missing.';
 
 const refresh = () => {
-    bind(container)`${renderDerivation(example, new StartPath(':root.'), new GoalExtender(example.conclusion))}`; // NOTE: StartPath MUST start with colon.
+    bind(container)`${renderDerivation(example, new StartPath(':root.'), new GoalExtender(example.conclusion), true, true)}`; // NOTE: StartPath MUST start with colon.
 };
 
 const onClick = (event: MouseEvent) => {
     const target: any = event.target;
     let extraData = target.data as {extender: DerivationExtender, formula?: SimpleFormula, inPremises?: boolean};
     if(target.data === void(0)) {
-        extraData = target.closest('.topLevel').data;
+        const closest = target.closest('.topLevel');
+        if(closest === null) return;
+        extraData = closest.data;
     }
 
     if(extraData.formula === void(0)) {
@@ -557,7 +678,8 @@ const onClick = (event: MouseEvent) => {
     } else {
         const output = classicalSequentCalculus(new ApplyTactic(extraData.extender.goal, extraData.formula, extraData.inPremises!!));
         example = output.match(
-            goals => extraData.extender.extend(goals.map(g => new OpenDerivation(g))),
+            () => example,
+            (name, goals) => extraData.extender.extend(name, goals.map(g => new OpenDerivation(g))),
             (goal, formula, inPremises) => { throw 'Not implemented yet.'; }); // TODO
     }
     refresh();
