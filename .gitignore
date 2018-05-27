@@ -1,3 +1,4 @@
 **/*.js.map
 node_modules/
 bundle.js
+.rpt2_cache/

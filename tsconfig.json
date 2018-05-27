@@ -1,7 +1,7 @@
 {
     "compilerOptions": {
         "target": "es5",                          /* Specify ECMAScript target version: 'ES3' (default), 'ES5', 'ES2015', 'ES2016', 'ES2017', or 'ESNEXT'. */
-        "module": "commonjs",                     /* Specify module code generation: 'commonjs', 'amd', 'system', 'umd', 'es2015', or 'ESNext'. */
+        "module": "es2015",                     /* Specify module code generation: 'commonjs', 'amd', 'system', 'umd', 'es2015', or 'ESNext'. */
         "lib": ["es5", "es2015.symbol", "es2015.iterable", "dom", "esnext.array"],
         // "allowJs": true,                       /* Allow javascript files to be compiled. */
         // "checkJs": true,                       /* Report errors in .js files. */
@@ -45,6 +45,7 @@
         // "inlineSources": true,                 /* Emit the source alongside the sourcemaps within a single file; requires '--inlineSourceMap' or '--sourceMap' to be set. */
     },
     "files": [
-        "ndjs.ts"
+        "ndjs.ts",
+        "json-with-sharing.ts"
     ]
 }

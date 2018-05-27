@@ -1,8 +1,9 @@
-import { bind, wire } from "hyperhtml/cjs";
+import { bind, wire } from "hyperhtml/esm";
 import { runEffects, tap } from "@most/core";
 import { click } from "@most/dom-event";
 import { newDefaultScheduler } from "@most/scheduler";
 import { Set } from "immutable";
+import { cse } from "./json-with-sharing"
 
 type Json = any;
 
@@ -30,7 +31,7 @@ class Variable<V, O> implements GenericTerm<V, O> {
     }
 
     toJson(): Json {
-        return {variable: this.variable};
+        return this.variable;
     }
 
     freeVariables(): Set<V> {
@@ -56,7 +57,7 @@ class Operator<V, O> implements GenericTerm<V, O> {
     }
 
     toJson(): Json {
-        return {operator: this.operator, args: this.terms.map(t => t.toJson())};
+        return [this.operator, this.terms.map(t => t.toJson())];
     }
 
     freeVariables(): Set<V> {
@@ -75,6 +76,13 @@ class Operator<V, O> implements GenericTerm<V, O> {
                                && ts.every((t, i) => t.equals(this.terms[i])));
     }
 }
+
+/*
+function termFromJson(json: Json): SimpleTerm | null {
+    if(typeof json === 'string') return new Variable(json);
+    if(typeof json !== 'object' || json === null || !(json instanceof Array) || json.length < 1) return null;
+}
+*/
 
 // TODO: Make a Term parser.
 // TODO: fromJson
@@ -102,7 +110,7 @@ class Predicate<V, P, C, Q, O, T extends GenericTerm<V, O>> implements GenericFo
     }
 
     toJson(): Json {
-        return {predicate: this.predicate, args: this.terms.map(t => t.toJson())};
+        return [this.predicate, this.terms.map(t => t.toJson())];
     }
 
     freeVariables(): Set<V> {
@@ -131,7 +139,7 @@ class NullaryConnective<V, P, C, Q, O, T extends GenericTerm<V, O>> implements G
     }
 
     toJson(): Json {
-        return {connective: this.connective};
+        return this.connective;
     }
 
     freeVariables(): Set<V> {
@@ -154,7 +162,7 @@ class UnaryConnective<V, P, C, Q, O, T extends GenericTerm<V, O>> implements Gen
     }
 
     toJson(): Json {
-        return {connective: this.connective, right: this.formula.toJson()};
+        return {c: this.connective, r: this.formula.toJson()};
     }
 
     freeVariables(): Set<V> {
@@ -179,7 +187,7 @@ class BinaryConnective<V, P, C, Q, O, T extends GenericTerm<V, O>> implements Ge
     }
 
     toJson(): Json {
-        return {connective: this.connective, left: this.leftFormula.toJson(), right: this.rightFormula.toJson()};
+        return {c: this.connective, l: this.leftFormula.toJson(), r: this.rightFormula.toJson()};
     }
 
     freeVariables(): Set<V> {
@@ -204,7 +212,7 @@ class Quantifier<V, P, C, Q, O, T extends GenericTerm<V, O>> implements GenericF
     }
 
     toJson(): Json {
-        return {quantifier: this.quantifier, variable: this.variable, formula: this.formula.toJson()};
+        return {q: this.quantifier, v: this.variable, f: this.formula.toJson()};
     }
 
     freeVariables(): Set<V> {
@@ -218,6 +226,7 @@ class Quantifier<V, P, C, Q, O, T extends GenericTerm<V, O>> implements GenericF
     matches(predicate: P, terms: Array<T>): boolean { return false; }
 }
 
+// TODO: Make a Formula parser.
 // TODO: fromJson
 
 /* Goals ************************************************************************************************************************************************************/
@@ -235,10 +244,11 @@ class Goal<F extends ToJson> implements GenericGoal<F> {
     }
 
     toJson(): Json {
-        return {premises: this.premises.map(p => p.toJson()), consequences: this.consequences.map(c => c.toJson())};
+        return [this.premises.map(p => p.toJson()), this.consequences.map(c => c.toJson())];
     }
 }
 
+// TODO: Make a Goal parser.
 // TODO: fromJson
 
 /* Derivations ******************************************************************************************************************************************************/
@@ -256,13 +266,12 @@ class OpenDerivation<G extends ToJson> implements GenericDerivation<G> {
     }
 
     toJson(): Json {
-        return {conclusion: this.conclusion.toJson()};
+        return {c: this.conclusion.toJson()};
     }
 
     isCompleted(): boolean { return false; }
 }
 
-// TODO: Add name.
 class Inference<G extends ToJson> implements GenericDerivation<G> {
     constructor(readonly name: string, readonly premises: Array<GenericDerivation<G>>, readonly conclusion: G) {}
     match<A>(openCase: (conclusion: G) => A, inferenceCase: (name: string, premises: Array<GenericDerivation<G>>, conclusion: G) => A): A {
@@ -270,7 +279,7 @@ class Inference<G extends ToJson> implements GenericDerivation<G> {
     }
 
     toJson(): Json {
-        return {name: this.name, conclusion: this.conclusion.toJson(), premises: this.premises.map(p => p.toJson())};
+        return {n: this.name, c: this.conclusion.toJson(), p: this.premises.map(p => p.toJson())};
     }
 
     isCompleted(): boolean { return this.premises.every(p => p.isCompleted()); }
@@ -419,7 +428,7 @@ function renderDerivation(d: SimpleDerivation, path: Path, extender: DerivationE
     const id = path.toString();
     const classes = (first ? 'derivation first' : 'derivation') + (root && d.isCompleted() ? ' completed' : '');
     return d.match(
-        c => wire(d, id)`<div id="${id}" class="${classes + ' open'}">${renderGoal(c, path, extender)}</div>`,
+        c => wire(d, id)`<div id="${id}" class="${classes + ' open'}">${renderGoal(c, path/*TODO:extend(0)*/, extender)}</div>`,
         (n, ps, c) => 
             wire(d, id)`<div id="${id}" class="${classes + ' closed'}">
                             <div class="row rulePremise">
@@ -435,7 +444,7 @@ function renderDerivation(d: SimpleDerivation, path: Path, extender: DerivationE
                             </div>
                             <div class="tag">${n}</div>
                             <div class="row ruleConclusion">
-                                ${renderGoal(c, path, extender)}
+                                ${renderGoal(c, path.extend(ps.length), extender)}
                             </div>
                         </div>`);
 }
@@ -655,12 +664,13 @@ const classicalSequentCalculus: Logic = (input) => input.match(
 const A = predicate('A');
 const B = predicate('B');
 
-let example: SimpleDerivation = open(entails([A,B], [and(A, B)]));
+let example: SimpleDerivation = open(entails([], [implies(implies(implies(A, B), A), A)]));
 
 const container = document.getElementById('container');
 if(container === null) throw 'Container missing.';
 
 const refresh = () => {
+    location.hash = '#'+encodeURIComponent(JSON.stringify(cse(example.toJson())));
     bind(container)`${renderDerivation(example, new StartPath(':root.'), new GoalExtender(example.conclusion), true, true)}`; // NOTE: StartPath MUST start with colon.
 };
 
