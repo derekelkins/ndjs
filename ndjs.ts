@@ -3,9 +3,20 @@ import { runEffects, tap, merge } from "@most/core";
 import { click, domEvent, mouseleave, change } from "@most/dom-event";
 import { newDefaultScheduler } from "@most/scheduler";
 import { Set } from "immutable";
-import { cse } from "./json-with-sharing"
+import { cse, expandCse } from "./json-with-sharing"
 
 type Json = any;
+
+function nullMap<A, B>(xs: Array<A>, f: (x: A) => B | null): Array<B> | null {
+    const len = xs.length;
+    const result = new Array<B>(len);
+    for(let i = 0; i < len; ++i) {
+        const y = f(xs[i]);
+        if(y === null) return null;
+        result[i] = y;
+    }
+    return result;
+}
 
 interface ToJson {
     toJson(): Json;
@@ -57,7 +68,7 @@ class Operator<V, O> implements GenericTerm<V, O> {
     }
 
     toJson(): Json {
-        return [this.operator, this.terms.map(t => t.toJson())];
+        return [this.operator].concat(this.terms.map(t => t.toJson()));
     }
 
     freeVariables(): Set<V> {
@@ -77,14 +88,13 @@ class Operator<V, O> implements GenericTerm<V, O> {
     }
 }
 
-/*
 function termFromJson(json: Json): SimpleTerm | null {
     if(typeof json === 'string') return new Variable(json);
     if(typeof json !== 'object' || json === null || !(json instanceof Array) || json.length < 1) return null;
+    const terms = nullMap(json.slice(1), termFromJson);
+    if(terms === null) return null;
+    return new Operator(json[0], ...terms);
 }
-*/
-
-// TODO: fromJson
 
 /* Formulas *********************************************************************************************************************************************************/
 
@@ -109,7 +119,7 @@ class Predicate<V, P, C, Q, O, T extends GenericTerm<V, O>> implements GenericFo
     }
 
     toJson(): Json {
-        return [this.predicate, this.terms.map(t => t.toJson())];
+        return [this.predicate].concat(this.terms.map(t => t.toJson()));
     }
 
     freeVariables(): Set<V> {
@@ -226,7 +236,39 @@ class Quantifier<V, P, C, Q, O, T extends GenericTerm<V, O>> implements GenericF
     matches(predicate: P, terms: Array<T>): boolean { return false; }
 }
 
-// TODO: fromJson
+function formulaFromJson(json: Json): SimpleFormula | null {
+    if(typeof json === 'string') return new NullaryConnective(json);
+    if(typeof json !== 'object' || json === null) return null;
+    if(json instanceof Array) { // Predicate case
+        if(json.length < 1) return null;
+        const terms = nullMap(json.slice(1), termFromJson);
+        if(terms === null) return null;
+        return new Predicate(json[0], ...terms);
+    }
+    if('q' in json) { // Quantifier case
+        const q = json.q;
+        if(typeof q !== 'string') return null;
+        const v = json.v;
+        if(typeof v !== 'string') return null;
+        const f = formulaFromJson(json.f);
+        if(f === null) return null;
+        return new Quantifier(q, v, f);
+    } else if('l' in json) { // Binary connective case
+        const c = json.c;
+        if(typeof c !== 'string') return null;
+        const r = formulaFromJson(json.r);
+        if(r === null) return null;
+        const l = formulaFromJson(json.l);
+        if(l === null) return null;
+        return new BinaryConnective(l, c, r);
+    } else { // Unary Connective case
+        const c = json.c;
+        if(typeof c !== 'string') return null;
+        const r = formulaFromJson(json.r);
+        if(r === null) return null;
+        return new UnaryConnective(c, r);
+    }
+}
 
 /* Goals ************************************************************************************************************************************************************/
 
@@ -247,7 +289,15 @@ class Goal<F extends ToJson> implements GenericGoal<F> {
     }
 }
 
-// TODO: fromJson
+function goalFromJson(json: Json): SimpleGoal | null {
+    if(typeof json !== 'object' || json === null || !(json instanceof Array) || json.length !== 2) return null;
+    if(!(json[0] instanceof Array && json[1] instanceof Array)) return null;
+    const premises = nullMap(json[0], formulaFromJson);
+    if(premises === null) return null;
+    const consequences = nullMap(json[1], formulaFromJson);
+    if(consequences === null) return null;
+    return new Goal(premises, consequences);
+}
 
 /* Lexer ************************************************************************************************************************************************************/
 
@@ -548,7 +598,22 @@ class Inference<G extends ToJson> implements GenericDerivation<G> {
     isCompleted(): boolean { return this.premises.every(p => p.isCompleted()); }
 }
 
-// TODO: fromJson
+function derivationFromJson(json: Json): SimpleDerivation | null {
+    if(typeof json !== 'object' || json === null || !('c' in json)) return null;
+    const conclusion = goalFromJson(json.c);
+    if(conclusion === null) return null;
+    if('n' in json) { // Inference case
+        const name = json.n;
+        if(typeof name !== 'string') return null;
+        const p = json.p;
+        if(typeof p !== 'object' || p === null || !(p instanceof Array)) return null;
+        const premises = nullMap(p, derivationFromJson);
+        if(premises === null) return null;
+        return new Inference(name, premises, conclusion);
+    } else { // Open case
+        return new OpenDerivation(conclusion);
+    }
+}
 
 /* Path *************************************************************************************************************************************************************/
 
@@ -996,6 +1061,18 @@ if(termBtn === null) throw 'Term button missing.';
 if(contractBtn === null) throw 'Contract button missing.';
 if(container === null) throw 'Container missing.';
 
+const derivationJson = JSON.parse(decodeURIComponent(location.hash.slice(1)));
+if(derivationJson !== void(0)) {
+    const json = expandCse(derivationJson);
+    const derivation = derivationFromJson(json);
+    if(derivation !== null) {
+        example = derivation;
+    } else {
+        // TODO: Remove else case
+        console.log({expanded: json, unexpanded: derivationJson, string: location.hash.slice(1)});
+    }
+}
+
 const refresh = () => {
     location.hash = '#'+encodeURIComponent(JSON.stringify(cse(example.toJson())));
     bind(container)`${renderDerivation(example, new StartPath('root.'), new GoalExtender(example.conclusion), true, true)}`;
@@ -1021,7 +1098,7 @@ const onClick = (event: MouseEvent) => {
                 return example;
             },
             (name, goals) => extraData.extender.extend(name, goals.map(g => new OpenDerivation(g))),
-            (goal, formula, inPremises) => {  // TODO: Save the extender so it can be used when the user is done interacting with the popup.
+            (goal, formula, inPremises) => {
                 (popup as any).data = extraData;
                 popup.style.left = (event.pageX-45) + 'px';
                 popup.style.top = (event.pageY-40) + 'px';
@@ -1072,6 +1149,8 @@ const onGoalInput = (event: Event) => {
         refresh();
     }
 };
+
+
 
 const onAnimationEnd = (event: Event) => toast.className = '';
 const onMouseLeave = (event: Event) => { (popup as any).data = void(0); popup.className = ''; }
