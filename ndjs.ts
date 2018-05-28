@@ -84,7 +84,6 @@ function termFromJson(json: Json): SimpleTerm | null {
 }
 */
 
-// TODO: Make a Term parser.
 // TODO: fromJson
 
 /* Formulas *********************************************************************************************************************************************************/
@@ -227,7 +226,6 @@ class Quantifier<V, P, C, Q, O, T extends GenericTerm<V, O>> implements GenericF
     matches(predicate: P, terms: Array<T>): boolean { return false; }
 }
 
-// TODO: Make a Formula parser.
 // TODO: fromJson
 
 /* Goals ************************************************************************************************************************************************************/
@@ -249,7 +247,6 @@ class Goal<F extends ToJson> implements GenericGoal<F> {
     }
 }
 
-// TODO: Make a Goal parser.
 // TODO: fromJson
 
 /* Lexer ************************************************************************************************************************************************************/
@@ -257,7 +254,7 @@ class Goal<F extends ToJson> implements GenericGoal<F> {
 type TokenType = 'NAME' | 'LPAREN' | 'RPAREN' | 'COMMA' | 'PERIOD' | 'TURNSTILE' | 'BOTTOM' | 'TOP' | 'NOT' | 'AND' | 'OR' | 'IMPLIES' | 'FORALL' | 'EXISTS';
 type Token = [TokenType, string];
 
-class Lexer {
+export class Lexer {
     static readonly NAME_TOKEN = 'NAME';
     static readonly LPAREN_TOKEN = 'LPAREN';
     static readonly RPAREN_TOKEN = 'RPAREN';
@@ -294,7 +291,6 @@ class Lexer {
 
     private position: number = 0;
     private buffer: Token | null = null;
-    constructor(private readonly inputString: string) { this.next(); }
 
     peek(): Token | null {
         return this.buffer;
@@ -333,73 +329,190 @@ class Lexer {
             return Lexer.spaceRegExp.test(input) ? 'done' : 'error';
         }
     }
+
+    constructor(private readonly inputString: string) { this.next(); }
 }
 
 /* Parser ***********************************************************************************************************************************************************/
 
 // TODO: Improve error messages.
-function parseTerm(lexer: Lexer, root: boolean = true): SimpleTerm | null {
+
+/*
+Term ::= NAME (LPAREN TermList RPAREN)?
+TermList ::= Term (COMMA Term)*
+*/
+function parseTerm(lexer: Lexer): SimpleTerm | null {
     const nameToken = lexer.peek();
     if(nameToken === null || nameToken[0] !== Lexer.NAME_TOKEN) return null;
-    const nextToken = lexer.next();
-    if(nextToken === 'error') return null;
-    if(root && nextToken === 'done') return new Variable(nameToken[1]);
-    if(!root && (nextToken[0] === Lexer.RPAREN_TOKEN || nextToken[0] === Lexer.COMMA_TOKEN)) return new Variable(nameToken[1]);
-    if(nextToken[0] !== Lexer.LPAREN_TOKEN) return null;
-    const terms: Array<SimpleTerm> = [];
+    const lparenToken = lexer.next();
+    if(lparenToken === 'error') return null;
+    if(lparenToken === 'done' || lparenToken[0] !== Lexer.LPAREN_TOKEN) return new Variable(nameToken[1]);
     lexer.next();
-    const firstTerm = parseTerm(lexer, false);
-    if(firstTerm !== null) {
-        terms.push(firstTerm);
-        while(true) {
-            const commaToken = lexer.peek();
-            if(commaToken === null) return null;
-            if(commaToken[0] === Lexer.RPAREN_TOKEN) {
-                const endToken = lexer.next();
-                if(root && endToken !== 'done') return null;
-                return new Operator(nameToken[1], ...terms);
-            }
-            if(commaToken[0] !== Lexer.COMMA_TOKEN) return null;
-            lexer.next();
-            const nextTerm = parseTerm(lexer, false);
-            if(nextTerm === null) return null;
-            terms.push(nextTerm);
-        }
-    } else {
-        const finalToken = lexer.peek();
-        if(finalToken === null || finalToken[0] !== Lexer.RPAREN_TOKEN) return null;
-        const endToken = lexer.next();
-        if(root && endToken !== 'done') return null;
-        return new Operator(nameToken[1]);
+    const terms = parseTermList(lexer);
+    if(terms === null) return null;
+    const rparenToken = lexer.peek();
+    if(rparenToken === null || rparenToken[0] !== Lexer.RPAREN_TOKEN) return null;
+    lexer.next();
+    return new Operator(nameToken[1], ...terms);
+}
+
+function parseTermList(lexer: Lexer): Array<SimpleTerm> | null {
+    const firstTerm = parseTerm(lexer);
+    if(firstTerm === null) return [];
+    const terms = [firstTerm];
+    while(true) {
+        const commaToken = lexer.peek();
+        if(commaToken === null || commaToken[0] !== Lexer.COMMA_TOKEN) return terms;
+        lexer.next();
+        const nextTerm = parseTerm(lexer);
+        if(nextTerm === null) return null;
+        terms.push(nextTerm);
     }
 }
 
-export function termFromString(s: string): SimpleTerm | null {
-    return parseTerm(new Lexer(s));
+function termFromString(s: string): SimpleTerm | null {
+    const lexer = new Lexer(s);
+    const term = parseTerm(lexer);
+    if(lexer.peek() !== null) return null; // we aren't at the end of the string
+    return term;
 }
 
 /*
-PEG.js grammar: (But the output is 600 lines and 17KB so I'll just write a simple recursive descent parser.)
+ NullaryConnective ::= TOP | BOTTOM
+ UnaryConnective ::= NOT
+ BinaryConnective ::= AND | OR | IMP
+ Quantifier ::= FORALL | EXISTS
+ AtomicFormula ::= NAME (LPAREN TermList RPAREN)?
+                 | NullaryConnective
+                 | LPAREN Formula RPAREN
+ Formula ::= AtamicFormula FormulaTail
+           | UnaryConnective AtomicFormula
+           | Quantifier NAME PERIOD AtomicFormula
+ FormulaTail ::= BinaryConnective AtomicFormula
+               | EMPTY
+*/
+function parseFormula(lexer: Lexer): SimpleFormula | null {
+    const leadToken = lexer.peek();
+    if(leadToken === null) return null;
+    switch(leadToken[0]) {
+        case Lexer.NOT_TOKEN:
+            lexer.next();
+            const f = parseAtomicFormula(lexer);
+            if(f === null) return null;
+            return new UnaryConnective(NOT_SYMBOL, f);
+        case Lexer.FORALL_TOKEN:
+        case Lexer.EXISTS_TOKEN:
+            const nameToken = lexer.next();
+            if(nameToken === 'done' || nameToken === 'error' || nameToken[0] !== Lexer.NAME_TOKEN) return null;
+            const periodToken = lexer.next();
+            if(periodToken === 'done' || periodToken === 'error' || periodToken[0] !== Lexer.PERIOD_TOKEN) return null;
+            lexer.next();
+            const formula = parseAtomicFormula(lexer);
+            if(formula === null) return null;
+            return new Quantifier(leadToken[0] === Lexer.FORALL_TOKEN ? FORALL_SYMBOL : EXISTS_SYMBOL, nameToken[1], formula);
+        default:
+            const lf = parseAtomicFormula(lexer);
+            if(lf === null) return null;
+            const rf = parseFormulaTail(lexer);
+            if(rf === null) return lf;
+            const conn = rf[0] === Lexer.AND_TOKEN ? AND_SYMBOL : rf[0] === Lexer.OR_TOKEN ? OR_SYMBOL : IMP_SYMBOL;
+            return new BinaryConnective(lf, conn, rf[1]);
+    }
+}
 
-Term
-  = head:Name _ "(" first:Term _ ")" { 
-      return new Operator<Var, string>(head, first); 
-  }
-  / head:Name _ "(" first:Term tail:(_ "," Term)* _ ")" {
-      const ts = [first].concat(tail.map(t => t[2]));
-      return new Operator<Var, string>(head, ...ts);
-  }
-  / head:Name {
-      return new Variable<Var, string>(head);
-  }
+function parseAtomicFormula(lexer: Lexer): SimpleFormula | null {
+    const leadToken = lexer.peek();
+    if(leadToken === null) return null;
+    switch(leadToken[0]) {
+        case Lexer.TOP_TOKEN:
+            lexer.next();
+            return new NullaryConnective(TOP_SYMBOL);
+        case Lexer.BOT_TOKEN:
+            lexer.next();
+            return new NullaryConnective(BOT_SYMBOL);
+        case Lexer.NAME_TOKEN:
+            const lparenToken = lexer.next();
+            if(lparenToken === 'error') return null;
+            if(lparenToken === 'done' || lparenToken[0] !== Lexer.LPAREN_TOKEN) return new Predicate(leadToken[1]);
+            lexer.next();
+            const terms = parseTermList(lexer);
+            if(terms === null) return null;
+            const rparenToken = lexer.peek();
+            if(rparenToken === null || rparenToken[0] !== Lexer.RPAREN_TOKEN) return null;
+            lexer.next();
+            return new Predicate(leadToken[1], ...terms);
+        case Lexer.LPAREN_TOKEN:
+            lexer.next();
+            const formula = parseFormula(lexer);
+            if(formula === null) return null;
+            const rparenToken2 = lexer.peek();
+            if(rparenToken2 === null || rparenToken2[0] !== Lexer.RPAREN_TOKEN) return null;
+            lexer.next();
+            return formula;
+        default:
+            return null;
+    }
+}
 
-Name
-  = _ [a-zA-Z][a-zA-Z0-9]* { return text(); }
+type BinaryConnectiveName = 'AND' | 'OR' | 'IMPLIES';
 
-_ "whitespace"
-  = [ \t\n\r]*
-*/              
+function parseFormulaTail(lexer: Lexer): [BinaryConnectiveName, SimpleFormula] | null {
+    const bc = lexer.peek();
+    if(bc === null || (bc[0] !== Lexer.AND_TOKEN && bc[0] !== Lexer.OR_TOKEN && bc[0] !== Lexer.IMP_TOKEN)) return null;
+    lexer.next();
+    const rf = parseAtomicFormula(lexer);
+    if(rf === null) return null;
+    return [bc[0] as BinaryConnectiveName, rf];
+}
 
+function formulaFromString(s: string): SimpleFormula | null {
+    const lexer = new Lexer(s);
+    const formula = parseFormula(lexer);
+    if(lexer.peek() !== null) return null; // we aren't at the end of the string
+    return formula;
+}
+
+/*
+Goal ::= FormulaList TURNSTILE FormulaList
+FormulaList ::= Formula (COMMA Formula)*
+*/
+function parseGoal(lexer: Lexer, lax: boolean = true): SimpleGoal | null {
+    const premises = parseFormulaList(lexer);
+    if(premises === null) return null;
+    const turnstileToken = lexer.peek();
+    if(turnstileToken === null || turnstileToken[0] !== Lexer.TURNSTILE_TOKEN) {
+        if(lax && premises.length === 1) { // A single formula which we'll treat as the conclusion to prove.
+            return new Goal([], premises);
+        } else {
+            return null;
+        }
+    }
+    lexer.next();
+    const consequences = parseFormulaList(lexer);
+    if(consequences === null) return null;
+    return new Goal(premises, consequences);
+}
+
+function parseFormulaList(lexer: Lexer): Array<SimpleFormula> | null {
+    const firstFormula = parseFormula(lexer);
+    if(firstFormula === null) return [];
+    const formulas = [firstFormula];
+    while(true) {
+        const commaToken = lexer.peek();
+        if(commaToken === null || commaToken[0] !== Lexer.COMMA_TOKEN) return formulas;
+        lexer.next();
+        const nextFormula = parseFormula(lexer);
+        if(nextFormula === null) return null;
+        formulas.push(nextFormula);
+    }
+}
+
+function goalFromString(s: string, lax: boolean = true): SimpleGoal | null {
+    const lexer = new Lexer(s);
+    const goal = parseGoal(lexer, lax);
+    if(lexer.peek() !== null) return null; // we aren't at the end of the string
+    return goal;
+}
 
 /* Derivations ******************************************************************************************************************************************************/
 
