@@ -1,6 +1,6 @@
 import { bind, wire } from "hyperhtml/esm";
-import { runEffects, tap } from "@most/core";
-import { click, domEvent } from "@most/dom-event";
+import { runEffects, tap, merge } from "@most/core";
+import { click, domEvent, mouseleave, change } from "@most/dom-event";
 import { newDefaultScheduler } from "@most/scheduler";
 import { Set } from "immutable";
 import { cse } from "./json-with-sharing"
@@ -11,14 +11,14 @@ interface ToJson {
     toJson(): Json;
 }
 
-interface FreeVariables<V> {
+interface FreeVariables<V, T> {
     freeVariables(): Set<V>;
-    mapVariables(f: (v: V) => V): this;
+    substitute(f: (v: V) => T): this;
 }
 
 /* Terms ************************************************************************************************************************************************************/
 
-interface GenericTerm<V, O> extends ToJson, FreeVariables<V> {
+interface GenericTerm<V, O> extends ToJson, FreeVariables<V, GenericTerm<V, O>> {
     match<A>(variableCase: (v: V) => A,
              operatorCase: (operator: O, ...terms: Array<GenericTerm<V, O>>) => A): A;
     equals(other: GenericTerm<V, O>): boolean;
@@ -38,8 +38,8 @@ class Variable<V, O> implements GenericTerm<V, O> {
         return Set.of(this.variable);
     }
 
-    mapVariables(f: (v: V) => V): this {
-        return new Variable(f(this.variable)) as this;
+    substitute(f: (v: V) => GenericTerm<V, O>): this {
+        return f(this.variable) as this;
     }
 
     equals(other: GenericTerm<V, O>): boolean {
@@ -64,8 +64,8 @@ class Operator<V, O> implements GenericTerm<V, O> {
         return Set.union(this.terms.map(t => t.freeVariables()));
     }
 
-    mapVariables(f: (v: V) => V): this {
-        return new Operator(this.operator, ...this.terms.map(t => t.mapVariables(f))) as this;
+    substitute(f: (v: V) => GenericTerm<V, O>): this {
+        return new Operator(this.operator, ...this.terms.map(t => t.substitute(f))) as this;
     }
 
     equals(other: GenericTerm<V, O>): boolean {
@@ -89,7 +89,7 @@ function termFromJson(json: Json): SimpleTerm | null {
 
 /* Formulas *********************************************************************************************************************************************************/
 
-interface GenericFormula<V, P, C, Q, O, T extends GenericTerm<V, O>> extends ToJson, FreeVariables<V> {
+interface GenericFormula<V, P, C, Q, O, T extends GenericTerm<V, O>> extends ToJson, FreeVariables<V, GenericTerm<V, O>> {
     match<A>(predicateCase: (predicate: P, ...terms: Array<T>) => A,
              nullaryCase: (connective: C) => A,
              unaryCase: (connective: C, formula: GenericFormula<V, P, C, Q, O, T>) => A,
@@ -117,8 +117,8 @@ class Predicate<V, P, C, Q, O, T extends GenericTerm<V, O>> implements GenericFo
         return Set.union(this.terms.map(t => t.freeVariables()));
     }
 
-    mapVariables(f: (v: V) => V): this {
-        return new Predicate(this.predicate, ...this.terms.map(t => t.mapVariables(f))) as this;
+    substitute(f: (v: V) => GenericTerm<V, O>): this {
+        return new Predicate(this.predicate, ...this.terms.map(t => t.substitute(f))) as this;
     }
 
     matches(predicate: P, terms: Array<T>): boolean { 
@@ -146,7 +146,7 @@ class NullaryConnective<V, P, C, Q, O, T extends GenericTerm<V, O>> implements G
         return Set();
     }
 
-    mapVariables(f: (v: V) => V): this { return this; }
+    substitute(f: (v: V) => GenericTerm<V, O>): this { return this; }
 
     matches(predicate: P, terms: Array<T>): boolean { return false; }
 }
@@ -169,8 +169,8 @@ class UnaryConnective<V, P, C, Q, O, T extends GenericTerm<V, O>> implements Gen
         return this.formula.freeVariables();
     }
 
-    mapVariables(f: (v: V) => V): this {
-        return new UnaryConnective(this.connective, this.formula.mapVariables(f)) as this;
+    substitute(f: (v: V) => GenericTerm<V, O>): this {
+        return new UnaryConnective(this.connective, this.formula.substitute(f)) as this;
     }
 
     matches(predicate: P, terms: Array<T>): boolean { return false; }
@@ -194,8 +194,8 @@ class BinaryConnective<V, P, C, Q, O, T extends GenericTerm<V, O>> implements Ge
         return this.leftFormula.freeVariables().union(this.rightFormula.freeVariables());
     }
 
-    mapVariables(f: (v: V) => V): this {
-        return new BinaryConnective(this.leftFormula.mapVariables(f), this.connective, this.rightFormula.mapVariables(f)) as this;
+    substitute(f: (v: V) => GenericTerm<V, O>): this {
+        return new BinaryConnective(this.leftFormula.substitute(f), this.connective, this.rightFormula.substitute(f)) as this;
     }
 
     matches(predicate: P, terms: Array<T>): boolean { return false; }
@@ -219,8 +219,9 @@ class Quantifier<V, P, C, Q, O, T extends GenericTerm<V, O>> implements GenericF
         return this.formula.freeVariables().delete(this.variable);
     }
 
-    mapVariables(f: (v: V) => V): this {
-        return new Quantifier(this.quantifier, f(this.variable), this.formula.mapVariables(f)) as this;
+    substitute(f: (v: V) => GenericTerm<V, O>): this {
+        // TODO: This is where we'd need to do some renaming.
+        return new Quantifier(this.quantifier, this.variable, this.formula.substitute(f)) as this;
     }
 
     matches(predicate: P, terms: Array<T>): boolean { return false; }
@@ -231,14 +232,13 @@ class Quantifier<V, P, C, Q, O, T extends GenericTerm<V, O>> implements GenericF
 
 /* Goals ************************************************************************************************************************************************************/
 
-interface GenericGoal<V, F extends ToJson & FreeVariables<V>> extends ToJson, FreeVariables<V> {
+interface GenericGoal<F extends ToJson> extends ToJson {
     match<A>(f: (premises: Array<F>, consequences: Array<F>) => A): A;
     readonly premises: Array<F>;
     readonly consequences: Array<F>;
 }
 
-class Goal<V, F extends ToJson & FreeVariables<V>> implements GenericGoal<V, F> {
-    private freeVariablesCache: Set<V> | null = null;
+class Goal<F extends ToJson> implements GenericGoal<F> {
     constructor(readonly premises: Array<F>, readonly consequences: Array<F>) {}
     match<A>(f: (premises: Array<F>, consequences: Array<F>) => A): A {
         return f(this.premises, this.consequences);
@@ -247,19 +247,159 @@ class Goal<V, F extends ToJson & FreeVariables<V>> implements GenericGoal<V, F> 
     toJson(): Json {
         return [this.premises.map(p => p.toJson()), this.consequences.map(c => c.toJson())];
     }
-
-    freeVariables(): Set<V> {
-        if(this.freeVariablesCache !== null) return this.freeVariablesCache;
-        return this.freeVariablesCache = Set.union(this.premises.map(p => p.freeVariables()).concat(this.consequences.map(c => c.freeVariables())));
-    }
-
-    mapVariables(f: (v: V) => V): this {
-        return new Goal(this.premises.map(p => p.mapVariables(f)), this.consequences.map(c => c.mapVariables(f))) as this;
-    }
 }
 
 // TODO: Make a Goal parser.
 // TODO: fromJson
+
+/* Lexer ************************************************************************************************************************************************************/
+
+type TokenType = 'NAME' | 'LPAREN' | 'RPAREN' | 'COMMA' | 'PERIOD' | 'TURNSTILE' | 'BOTTOM' | 'TOP' | 'NOT' | 'AND' | 'OR' | 'IMPLIES' | 'FORALL' | 'EXISTS';
+type Token = [TokenType, string];
+
+class Lexer {
+    static readonly NAME_TOKEN = 'NAME';
+    static readonly LPAREN_TOKEN = 'LPAREN';
+    static readonly RPAREN_TOKEN = 'RPAREN';
+    static readonly COMMA_TOKEN = 'COMMA';
+    static readonly PERIOD_TOKEN = 'PERIOD';
+    static readonly TURNSTILE_TOKEN = 'TURNSTILE';
+    static readonly BOT_TOKEN = 'BOTTOM';
+    static readonly TOP_TOKEN = 'TOP';
+    static readonly NOT_TOKEN = 'NOT';
+    static readonly AND_TOKEN = 'AND';
+    static readonly OR_TOKEN = 'OR';
+    static readonly IMP_TOKEN = 'IMPLIES';
+    static readonly FORALL_TOKEN = 'FORALL';
+    static readonly EXISTS_TOKEN = 'EXISTS';
+
+    private static readonly lexTable = {
+        [Lexer.NAME_TOKEN]: /^\s*([a-zA-Z][a-zA-Z0-9]*)/giu,
+        [Lexer.LPAREN_TOKEN]: /^\s*(\()/giu,
+        [Lexer.RPAREN_TOKEN]: /^\s*(\))/giu,
+        [Lexer.COMMA_TOKEN]: /^\s*(,)/giu,
+        [Lexer.PERIOD_TOKEN]: /^\s*(\.)/giu,
+        [Lexer.TURNSTILE_TOKEN]: /^\s*(\|-|⊢)/giu,
+        [Lexer.BOT_TOKEN]: /^\s*(_\|_|⊥)/giu,
+        [Lexer.TOP_TOKEN]: /^\s*(⊤)/giu, // TODO: ASCII version?
+        [Lexer.NOT_TOKEN]: /^\s*(~|¬)/giu,
+        [Lexer.AND_TOKEN]: /^\s*(\/\\|∧)/giu,
+        [Lexer.OR_TOKEN]: /^\s*(\\\/|∨)/giu,
+        [Lexer.IMP_TOKEN]: /^\s*(->|=>|⇒|→)/giu,
+        [Lexer.FORALL_TOKEN]: /^\s*(forall|∀)/giu,
+        [Lexer.EXISTS_TOKEN]: /^\s*(exists|∃)/giu
+    };
+
+    private static readonly spaceRegExp = /^\s*$/gu;
+
+    private position: number = 0;
+    private buffer: Token | null = null;
+    constructor(private readonly inputString: string) { this.next(); }
+
+    peek(): Token | null {
+        return this.buffer;
+    }
+
+    next(): Token | 'done' | 'error' {
+        const result = this.innerNext();
+        this.buffer = result === 'done' || result === 'error' ? null : result;
+        return result;
+    }
+
+    private innerNext(): Token | 'done' | 'error' {
+        const nameRE = Lexer.lexTable[Lexer.NAME_TOKEN];
+        //nameRE.lastIndex = this.position;
+        const input = this.inputString.slice(this.position);
+        nameRE.lastIndex = 0;
+        const nameResult = nameRE.exec(input);
+        if(nameResult !== null) {
+            this.position += nameRE.lastIndex;
+            const s = nameResult[1];
+            if(/^forall$/i.test(s)) return [Lexer.FORALL_TOKEN, s];
+            if(/^exists$/i.test(s)) return [Lexer.EXISTS_TOKEN, s];
+            return [Lexer.NAME_TOKEN, s];
+        } else {
+            for(const reName in Lexer.lexTable) {
+                if(reName === Lexer.NAME_TOKEN) continue;
+                const re = Lexer.lexTable[reName as TokenType];
+                //re.lastIndex = this.position;
+                re.lastIndex = 0;
+                const result = re.exec(input);
+                if(result === null) continue;
+                this.position += re.lastIndex;
+                return [reName as TokenType, result[1]];
+            }
+            Lexer.spaceRegExp.lastIndex = 0;
+            return Lexer.spaceRegExp.test(input) ? 'done' : 'error';
+        }
+    }
+}
+
+/* Parser ***********************************************************************************************************************************************************/
+
+// TODO: Improve error messages.
+function parseTerm(lexer: Lexer, root: boolean = true): SimpleTerm | null {
+    const nameToken = lexer.peek();
+    if(nameToken === null || nameToken[0] !== Lexer.NAME_TOKEN) return null;
+    const nextToken = lexer.next();
+    if(nextToken === 'error') return null;
+    if(root && nextToken === 'done') return new Variable(nameToken[1]);
+    if(!root && (nextToken[0] === Lexer.RPAREN_TOKEN || nextToken[0] === Lexer.COMMA_TOKEN)) return new Variable(nameToken[1]);
+    if(nextToken[0] !== Lexer.LPAREN_TOKEN) return null;
+    const terms: Array<SimpleTerm> = [];
+    lexer.next();
+    const firstTerm = parseTerm(lexer, false);
+    if(firstTerm !== null) {
+        terms.push(firstTerm);
+        while(true) {
+            const commaToken = lexer.peek();
+            if(commaToken === null) return null;
+            if(commaToken[0] === Lexer.RPAREN_TOKEN) {
+                const endToken = lexer.next();
+                if(root && endToken !== 'done') return null;
+                return new Operator(nameToken[1], ...terms);
+            }
+            if(commaToken[0] !== Lexer.COMMA_TOKEN) return null;
+            lexer.next();
+            const nextTerm = parseTerm(lexer, false);
+            if(nextTerm === null) return null;
+            terms.push(nextTerm);
+        }
+    } else {
+        const finalToken = lexer.peek();
+        if(finalToken === null || finalToken[0] !== Lexer.RPAREN_TOKEN) return null;
+        const endToken = lexer.next();
+        if(root && endToken !== 'done') return null;
+        return new Operator(nameToken[1]);
+    }
+}
+
+export function termFromString(s: string): SimpleTerm | null {
+    return parseTerm(new Lexer(s));
+}
+
+/*
+PEG.js grammar: (But the output is 600 lines and 17KB so I'll just write a simple recursive descent parser.)
+
+Term
+  = head:Name _ "(" first:Term _ ")" { 
+      return new Operator<Var, string>(head, first); 
+  }
+  / head:Name _ "(" first:Term tail:(_ "," Term)* _ ")" {
+      const ts = [first].concat(tail.map(t => t[2]));
+      return new Operator<Var, string>(head, ...ts);
+  }
+  / head:Name {
+      return new Variable<Var, string>(head);
+  }
+
+Name
+  = _ [a-zA-Z][a-zA-Z0-9]* { return text(); }
+
+_ "whitespace"
+  = [ \t\n\r]*
+*/              
+
 
 /* Derivations ******************************************************************************************************************************************************/
 
@@ -359,15 +499,15 @@ type Var = string;
 
 type SimpleTerm = GenericTerm<Var, string>;
 type SimpleFormula = GenericFormula<Var, string, string, string, string, SimpleTerm>;
-type SimpleGoal = GenericGoal<Var, SimpleFormula>;
+type SimpleGoal = GenericGoal<SimpleFormula>;
 type SimpleDerivation = GenericDerivation<SimpleGoal>;
 
 function renderTerm(t: SimpleTerm): Element {
     return t.match(
         v => wire()`<span class="occurrence">${v}</span>`,
-        (o, ...ts) => wire()`<span class="operator">${o}</span>${ts.length === 0 ? '' : '('}${
+        (o, ...ts) => wire()`<span class="operator">${o}</span>(${
                                 ts.flatMap((t, i) => i+1 === ts.length ? [renderTerm(t)] : [renderTerm(t), wire()`, `])
-                             }${ts.length === 0 ? '' : ')'}`);
+                             })`);
 }
 
 // TODO: Add precedence system.
@@ -517,8 +657,8 @@ function exists(v: Var, f: SimpleFormula): SimpleFormula {
 
 function open(conclusion: SimpleGoal): SimpleDerivation { return new OpenDerivation<SimpleGoal>(conclusion); }
 
-function entails(premises: Array<SimpleFormula>, consequences: Array<SimpleFormula>): Goal<Var, SimpleFormula> {
-    return new Goal<Var, SimpleFormula>(premises, consequences);
+function entails(premises: Array<SimpleFormula>, consequences: Array<SimpleFormula>): Goal<SimpleFormula> {
+    return new Goal<SimpleFormula>(premises, consequences);
 }
 
 function infers(name: string, premises: Array<SimpleDerivation>, conclusion: SimpleGoal): Inference<SimpleGoal> {
@@ -660,13 +800,13 @@ const classicalSequentCalculus: Logic = (input) => input.match(
                     } else {
                         const cs = goal.consequences.filter(f => f !== formula);
                         return new NewGoals('∧R', [new Goal(goal.premises, cs.concat(lf)),
-                                             new Goal(goal.premises, cs.concat(rf))]);
+                                                   new Goal(goal.premises, cs.concat(rf))]);
                     }
                 case OR_SYMBOL:
                     if(inPremises) {
                         const ps = goal.premises.filter(f => f !== formula);
                         return new NewGoals('∨L', [new Goal(ps.concat(lf), goal.consequences),
-                                             new Goal(ps.concat(rf), goal.consequences)]);
+                                                   new Goal(ps.concat(rf), goal.consequences)]);
                     } else {
                         return new NewGoals('∨R', [new Goal(goal.premises, goal.consequences.filter(f => f !== formula).concat(lf,rf))]);
                     }
@@ -674,7 +814,7 @@ const classicalSequentCalculus: Logic = (input) => input.match(
                     if(inPremises) {
                         const ps = goal.premises.filter(f => f !== formula);
                         return new NewGoals('⇒L', [new Goal(ps, goal.consequences.concat(lf)),
-                                             new Goal(ps.concat(rf), goal.consequences)]);
+                                                   new Goal(ps.concat(rf), goal.consequences)]);
                     } else {
                         return new NewGoals('⇒R', [new Goal(goal.premises.concat(lf), goal.consequences.filter(f => f !== formula).concat(rf))]);
                     }
@@ -703,13 +843,14 @@ const classicalSequentCalculus: Logic = (input) => input.match(
         }),
     (goal, formula, inPremises) => {
         if(inPremises) {
-            return new NewGoals('CL', [new Goal(goal.premises, goal.consequences.concat(formula))]);
+            return new NewGoals('CL', [new Goal(goal.premises.concat(formula), goal.consequences)]);
         } else {
-            return new NewGoals('CR', [new Goal(goal.premises.concat(formula), goal.consequences)]);
+            return new NewGoals('CR', [new Goal(goal.premises, goal.consequences.concat(formula))]);
         }
     },
     (goal, formula, inPremises, term) => { 
         if(!(formula instanceof Quantifier)) throw 'Non-quantified expression not expected.';
+        // NOTE: Can't be as gung-ho about filtering out the original formulas from the contexts due to contraction.
 
         if(inPremises) { // then forall case
         
@@ -724,12 +865,20 @@ const classicalSequentCalculus: Logic = (input) => input.match(
 const A = predicate('A');
 const B = predicate('B');
 
-let example: SimpleDerivation = open(entails([], [implies(implies(implies(A, B), A), A)]));
-//let example: SimpleDerivation = open(entails([exists('x', forall('y', predicate('P', variable('x'), variable('y'))))], [forall('x', exists('y', predicate('P', variable('x'), variable('y'))))]));
+// let example: SimpleDerivation = open(entails([], [implies(implies(implies(A, B), A), A)]));
+let example: SimpleDerivation = open(entails([exists('x', forall('y', predicate('P', variable('x'), variable('y'))))], [forall('x', exists('y', predicate('P', variable('x'), variable('y'))))]));
 
 const container = document.getElementById('container');
 const toast = document.getElementById('toast');
+const popup = document.getElementById('popup');
+const termInput = document.getElementById('termInput');
+const termBtn = document.getElementById('termBtn');
+const contractBtn = document.getElementById('contractBtn');
+if(popup === null) throw 'Popup missing.';
 if(toast === null) throw 'Toast missing.';
+if(termInput === null) throw 'Term Input missing.';
+if(termBtn === null) throw 'Term button missing.';
+if(contractBtn === null) throw 'Contract button missing.';
 if(container === null) throw 'Container missing.';
 
 const refresh = () => {
@@ -757,16 +906,53 @@ const onClick = (event: MouseEvent) => {
                 return example;
             },
             (name, goals) => extraData.extender.extend(name, goals.map(g => new OpenDerivation(g))),
-            (goal, formula, inPremises) => { throw 'Not implemented yet.'; }); // TODO
+            (goal, formula, inPremises) => {  // TODO: Save the extender so it can be used when the user is done interacting with the popup.
+                (popup as any).data = extraData;
+                popup.style.left = (event.pageX-45) + 'px';
+                popup.style.top = (event.pageY-40) + 'px';
+                popup.className = 'shown';
+                return example;
+            });
     }
     refresh();
 };
 
-const onAnimationEnd = (event: Event) => {
-    toast.className = '';
+const onTermInput = (event: Event) => {
+    const extraData = (popup as any).data as {extender: DerivationExtender, formula: SimpleFormula, inPremises: boolean};
+    let output: OutputEvent;
+    if(event.target === contractBtn) {
+        output = classicalSequentCalculus(new Contract(extraData.extender.goal, extraData.formula, extraData.inPremises));
+    } else { // termBtn was clicked or termInput changed, either way do the same thing
+        const termString: string = (termInput as any).value;
+        const term = termFromString(termString);
+        if(term === null) {
+            output = new Failed(`Failed to parse term: ${termString}`);
+        } else {
+            output = classicalSequentCalculus(new Instantiate(extraData.extender.goal, extraData.formula, extraData.inPremises, term));
+        }
+    }
+    (termInput as any).value = '';
+    popup.className = '';
+    example = output.match(
+        (message) => {
+            toast.textContent = message;
+            toast.className = 'shown';
+            return example;
+        },
+        (name, goals) => extraData.extender.extend(name, goals.map(g => new OpenDerivation(g))),
+        (goal, formula, inPremises) => {
+            throw "Shouldn't happen"; // Right?
+        });
+    refresh();
 };
 
-runEffects(tap(onClick, click(container, true)), newDefaultScheduler());
-runEffects(tap(onAnimationEnd, domEvent('animationend', toast, false)), newDefaultScheduler());
+const onAnimationEnd = (event: Event) => toast.className = '';
+const onMouseLeave = (event: Event) => { (popup as any).data = void(0); popup.className = ''; }
+
+const scheduler = newDefaultScheduler();
+runEffects(tap(onClick, click(container, true)), scheduler);
+runEffects(tap(onTermInput, merge(change(termInput), merge(click(termBtn), click(contractBtn)))), scheduler);
+runEffects(tap(onAnimationEnd, domEvent('animationend', toast, false)), scheduler);
+runEffects(tap(onMouseLeave, mouseleave(popup, false)), scheduler);
 
 refresh();

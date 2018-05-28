@@ -33,16 +33,30 @@ body {
     box-shadow: 2px 2px 4px;
 }
 
-@keyframes fadeout {
-    from {
-        background-color: lightcoral;
-        color: black;
-    }
+#popup {
+    position: absolute;
+    padding-top: 50px;
+    padding-left: 50px;
+    display: none;
+}
 
-    to {
-        background-color: transparent;
-        color: transparent;
-    }
+#popupBody {    
+    padding: 0.5em;
+    background-color: black;
+    color: white;
+    width: 18em;
+}
+
+#popupBody > * {
+    margin-right: 1em;
+}
+
+#popup.shown {
+    display: block;
+}
+
+#termInput {
+    width: 3em;
 }
 
 @keyframes throb {
