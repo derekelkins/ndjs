@@ -978,17 +978,19 @@ const classicalSequentCalculus: Logic = (input) => input.match(
 const A = predicate('A');
 const B = predicate('B');
 
-// let example: SimpleDerivation = open(entails([], [implies(implies(implies(A, B), A), A)]));
-let example: SimpleDerivation = open(entails([exists('x', forall('y', predicate('P', variable('x'), variable('y'))))], [forall('x', exists('y', predicate('P', variable('x'), variable('y'))))]));
+let example: SimpleDerivation = open(entails([], [implies(implies(implies(A, B), A), A)]));
+//let example: SimpleDerivation = open(entails([exists('x', forall('y', predicate('P', variable('x'), variable('y'))))], [forall('x', exists('y', predicate('P', variable('x'), variable('y'))))]));
 
 const container = document.getElementById('container');
 const toast = document.getElementById('toast');
 const popup = document.getElementById('popup');
+const goalInput = document.getElementById('goalInput');
 const termInput = document.getElementById('termInput');
 const termBtn = document.getElementById('termBtn');
 const contractBtn = document.getElementById('contractBtn');
 if(popup === null) throw 'Popup missing.';
 if(toast === null) throw 'Toast missing.';
+if(goalInput === null) throw 'Goal Input missing.';
 if(termInput === null) throw 'Term Input missing.';
 if(termBtn === null) throw 'Term button missing.';
 if(contractBtn === null) throw 'Contract button missing.';
@@ -1059,12 +1061,25 @@ const onTermInput = (event: Event) => {
     refresh();
 };
 
+const onGoalInput = (event: Event) => {
+    const goalText: string = (goalInput as any).value;
+    const goal = goalFromString(goalText);
+    if(goal === null) {
+        toast.textContent = 'Failed to parse goal.';
+        toast.className = 'shown';
+    } else {
+        example = new OpenDerivation(goal);
+        refresh();
+    }
+};
+
 const onAnimationEnd = (event: Event) => toast.className = '';
 const onMouseLeave = (event: Event) => { (popup as any).data = void(0); popup.className = ''; }
 
 const scheduler = newDefaultScheduler();
 runEffects(tap(onClick, click(container, true)), scheduler);
 runEffects(tap(onTermInput, merge(change(termInput), merge(click(termBtn), click(contractBtn)))), scheduler);
+runEffects(tap(onGoalInput, change(goalInput)), scheduler);
 runEffects(tap(onAnimationEnd, domEvent('animationend', toast, false)), scheduler);
 runEffects(tap(onMouseLeave, mouseleave(popup, false)), scheduler);
 

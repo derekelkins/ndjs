@@ -2,6 +2,13 @@ body {
     font-family: "Roboto","Helvetica Neue",Helvetica,Arial,sans-serif;
 }
 
+#goalBox {
+    text-align: center;
+    margin: 0 auto;
+    margin-top: 2em;
+    width: 100%;
+}
+
 #container {
     text-align: center;
     margin: 0 auto;
