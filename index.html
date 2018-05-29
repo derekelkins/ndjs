@@ -11,7 +11,8 @@
 <body>
 
 <div id="goalBox">
-        Enter goal: <input type="text" id="goalInput" value="((A -> B) -> A) -> A"/>
+        For now, a purely client-side reimplementation of <a href="http://logitext.mit.edu/main">Logitext</a>.<br/><br/>
+        Enter goal or formula: <input type="text" id="goalInput" value="((A -> B) -> A) -> A"/>
 </div>
 <div id="container"></div>
 <div id="toast"></div>
@@ -22,6 +23,43 @@
             Enter a term and click Go, or click Contract to perform a contraction.
         </p>
     </div>
+</div>
+<div id="syntaxDescription">
+    <pre><code>
+    Term ::= NAME (LPAREN TermList RPAREN)?
+    TermList ::= Term (COMMA Term)*
+
+    Formula ::= AtamicFormula FormulaTail
+              | UnaryConnective AtomicFormula
+              | Quantifier NAME PERIOD AtomicFormula
+    AtomicFormula ::= NAME (LPAREN TermList RPAREN)?
+                    | NullaryConnective
+                    | LPAREN Formula RPAREN
+    FormulaTail ::= BinaryConnective AtomicFormula
+                  | EMPTY
+    NullaryConnective ::= TOP | BOTTOM
+    UnaryConnective ::= NOT
+    BinaryConnective ::= AND | OR | IMPLIES
+    Quantifier ::= FORALL | EXISTS
+
+    Goal ::= FormulaList TURNSTILE FormulaList
+    FormulaList ::= Formula (COMMA Formula)*
+
+    NAME: /[a-zA-Z][a-zA-Z0-9]*(_[0-9]+)?/
+    LPAREN: /\(/
+    RPAREN: /\)/
+    COMMA: /,/
+    PERIOD: /\./
+    TURNSTILE: /\|-|⊢/
+    BOT: /false|_\|_|⊥/i
+    TOP: /true|⊤/i
+    NOT: /~|¬/
+    AND: /\/\\|∧/
+    OR: /\\\/|∨/
+    IMPLIES: /->|=>|⇒|→/
+    FORALL: /forall|∀/i
+    EXISTS: /exists|∃/i
+    </code></pre>
 </div>
 <script type="text/javascript">
 Array.prototype.flatMap = function(f, t) {

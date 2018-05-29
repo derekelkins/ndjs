@@ -100,12 +100,12 @@ body {
     display: inline-block;
 }
 
-.occurrence {
+.occurrence, .boundVariable {
     font-style: italic;
 }
 
-.boundVariable {
-    font-style: italic;
+.boundVariable > sub, .occurrence > sub {
+    font-size: small;
 }
 
 .derivation.first {

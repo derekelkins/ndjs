@@ -1,8 +1,8 @@
 import { bind, wire } from "hyperhtml/esm";
 import { runEffects, tap, merge } from "@most/core";
-import { click, domEvent, mouseleave, change } from "@most/dom-event";
+import { click, domEvent, mouseleave, change, hashchange } from "@most/dom-event";
 import { newDefaultScheduler } from "@most/scheduler";
-import { Set } from "immutable";
+import { Set, ValueObject, hash } from "immutable";
 import { cse, expandCse } from "./json-with-sharing"
 
 type Json = any;
@@ -18,49 +18,78 @@ function nullMap<A, B>(xs: Array<A>, f: (x: A) => B | null): Array<B> | null {
     return result;
 }
 
+interface Equals<T> {
+    equals(other: T): boolean;
+}
+
+interface Freshen<V> {
+    freshen(variableContext: Set<V>): V;
+}
+
 interface ToJson {
     toJson(): Json;
 }
 
+interface Display {
+    toDisplayString(topLevel: boolean): string;
+}
+
 interface FreeVariables<V, T> {
     freeVariables(): Set<V>;
-    substitute(f: (v: V) => T): this;
 }
+
+interface Substitute<V, T> extends FreeVariables<V, T> {
+    // TODO: Probably want to do something to avoid recalculating free variables.
+    alphaRename(oldVar: V, newVar: V): this;
+    substitute(oldVar: V, term: T): this;
+}
+
+// Just for convenience
+interface IVariable<V> extends Equals<V>, ToJson, Freshen<V>, Display {}
+interface IGeneric<V extends IVariable<V>, O> extends ToJson, Substitute<V, GenericTerm<V, O>>, Display {}
 
 /* Terms ************************************************************************************************************************************************************/
 
-interface GenericTerm<V, O> extends ToJson, FreeVariables<V, GenericTerm<V, O>> {
+interface GenericTerm<V extends IVariable<V>, O> extends IGeneric<V, O>, Equals<GenericTerm<V, O>> {
     match<A>(variableCase: (v: V) => A,
              operatorCase: (operator: O, ...terms: Array<GenericTerm<V, O>>) => A): A;
     equals(other: GenericTerm<V, O>): boolean;
 }
 
-class Variable<V, O> implements GenericTerm<V, O> {
+class Variable<V extends IVariable<V>, O> implements GenericTerm<V, O> {
     constructor(readonly variable: V) {}
     match<A>(variableCase: (v: V) => A, opCase: (o: O, ...ts: Array<GenericTerm<V, O>>) => A): A {
         return variableCase(this.variable);
     }
 
     toJson(): Json {
-        return this.variable;
+        return this.variable.toJson();
     }
+
+    toDisplayString(topLevel: boolean): string { return this.variable.toDisplayString(true); }
 
     freeVariables(): Set<V> {
         return Set.of(this.variable);
     }
 
-    substitute(f: (v: V) => GenericTerm<V, O>): this {
-        return f(this.variable) as this;
+    alphaRename(oldVar: V, newVar: V): this {
+        if(this.variable.equals(oldVar)) return new Variable(newVar) as this;
+        return this;
+    }
+
+    substitute(oldVar: V, term: GenericTerm<V, O>): this {
+        if(!this.variable.equals(oldVar)) return this;
+        return term as this;
     }
 
     equals(other: GenericTerm<V, O>): boolean {
         return other.match(
-                    v => v === this.variable,
+                    v => this.variable.equals(v),
                     _ => false);
     }
 }
 
-class Operator<V, O> implements GenericTerm<V, O> {
+class Operator<V extends IVariable<V>, O> implements GenericTerm<V, O> {
     readonly terms: Array<GenericTerm<V, O>>;
     constructor(readonly operator: O, ...ts: Array<GenericTerm<V, O>>) { this.terms = ts; }
     match<A>(variableCase: (v: V) => A, opCase: (o: O, ...ts: Array<GenericTerm<V, O>>) => A): A {
@@ -71,12 +100,20 @@ class Operator<V, O> implements GenericTerm<V, O> {
         return [this.operator].concat(this.terms.map(t => t.toJson()));
     }
 
+    toDisplayString(topLevel: boolean): string { return this.operator+'('+this.terms.map(t => t.toDisplayString(true)).join(', ')+')'; }
+
     freeVariables(): Set<V> {
         return Set.union(this.terms.map(t => t.freeVariables()));
     }
 
-    substitute(f: (v: V) => GenericTerm<V, O>): this {
-        return new Operator(this.operator, ...this.terms.map(t => t.substitute(f))) as this;
+    alphaRename(oldVar: V, newVar: V): this {
+        if(!this.freeVariables().has(oldVar)) return this;
+        return new Operator(this.operator, ...this.terms.map(t => t.alphaRename(oldVar, newVar))) as this;
+    }
+
+    substitute(oldVar: V, term: GenericTerm<V, O>): this {
+        if(!this.freeVariables().has(oldVar)) return this;
+        return new Operator(this.operator, ...this.terms.map(t => t.substitute(oldVar, term))) as this;
     }
 
     equals(other: GenericTerm<V, O>): boolean {
@@ -88,8 +125,23 @@ class Operator<V, O> implements GenericTerm<V, O> {
     }
 }
 
+function varFromJson(json: Json): Var | null {
+    if(typeof json !== 'string') return null;
+    const components = json.split('.');
+    if(components.length !== 1 && components.length !== 2) return null;
+    try {
+        return new Var(components[0], components[1] === void(0) ? -1 : parseInt(components[1], 10));
+    } catch(SyntaxError) {
+        return null;
+    }
+}
+
 function termFromJson(json: Json): SimpleTerm | null {
-    if(typeof json === 'string') return new Variable(json);
+    if(typeof json === 'string') { // Variable case
+        const v = varFromJson(json);
+        if(v === null) return null;
+        return new Variable(v);
+    }
     if(typeof json !== 'object' || json === null || !(json instanceof Array) || json.length < 1) return null;
     const terms = nullMap(json.slice(1), termFromJson);
     if(terms === null) return null;
@@ -98,7 +150,7 @@ function termFromJson(json: Json): SimpleTerm | null {
 
 /* Formulas *********************************************************************************************************************************************************/
 
-interface GenericFormula<V, P, C, Q, O, T extends GenericTerm<V, O>> extends ToJson, FreeVariables<V, GenericTerm<V, O>> {
+interface GenericFormula<V extends IVariable<V>, P, C, Q, O, T extends GenericTerm<V, O>> extends IGeneric<V, O> {
     match<A>(predicateCase: (predicate: P, ...terms: Array<T>) => A,
              nullaryCase: (connective: C) => A,
              unaryCase: (connective: C, formula: GenericFormula<V, P, C, Q, O, T>) => A,
@@ -107,7 +159,7 @@ interface GenericFormula<V, P, C, Q, O, T extends GenericTerm<V, O>> extends ToJ
     matches(predicate: P, terms: Array<T>): boolean;
 }
 
-class Predicate<V, P, C, Q, O, T extends GenericTerm<V, O>> implements GenericFormula<V, P, C, Q, O, T> {
+class Predicate<V extends IVariable<V>, P, C, Q, O, T extends GenericTerm<V, O>> implements GenericFormula<V, P, C, Q, O, T> {
     readonly terms: Array<T>;
     constructor(readonly predicate: P, ...ts: Array<T>) { this.terms = ts; }
     match<A>(predicateCase: (predicate: P, ...terms: Array<T>) => A,
@@ -122,12 +174,20 @@ class Predicate<V, P, C, Q, O, T extends GenericTerm<V, O>> implements GenericFo
         return [this.predicate].concat(this.terms.map(t => t.toJson()));
     }
 
+    toDisplayString(topLevel: boolean): string { return this.predicate+'('+this.terms.map(t => t.toDisplayString(true)).join(', ')+')'; }
+
     freeVariables(): Set<V> {
         return Set.union(this.terms.map(t => t.freeVariables()));
     }
 
-    substitute(f: (v: V) => GenericTerm<V, O>): this {
-        return new Predicate(this.predicate, ...this.terms.map(t => t.substitute(f))) as this;
+    alphaRename(oldVar: V, newVar: V): this {
+        if(!this.freeVariables().has(oldVar)) return this;
+        return new Predicate(this.predicate, ...this.terms.map(t => t.alphaRename(oldVar, newVar))) as this;
+    }
+
+    substitute(oldVar: V, term: GenericTerm<V, O>): this {
+        if(!this.freeVariables().has(oldVar)) return this;
+        return new Predicate(this.predicate, ...this.terms.map(t => t.substitute(oldVar, term))) as this;
     }
 
     matches(predicate: P, terms: Array<T>): boolean { 
@@ -137,7 +197,7 @@ class Predicate<V, P, C, Q, O, T extends GenericTerm<V, O>> implements GenericFo
     }
 }
 
-class NullaryConnective<V, P, C, Q, O, T extends GenericTerm<V, O>> implements GenericFormula<V, P, C, Q, O, T> {
+class NullaryConnective<V extends IVariable<V>, P, C, Q, O, T extends GenericTerm<V, O>> implements GenericFormula<V, P, C, Q, O, T> {
     constructor(readonly connective: C) { }
     match<A>(predicateCase: (predicate: P, ...terms: Array<T>) => A,
              nullaryCase: (connective: C) => A,
@@ -151,16 +211,22 @@ class NullaryConnective<V, P, C, Q, O, T extends GenericTerm<V, O>> implements G
         return this.connective;
     }
 
+    toDisplayString(topLevel: boolean): string { return ''+this.connective; }
+
     freeVariables(): Set<V> {
         return Set();
     }
 
-    substitute(f: (v: V) => GenericTerm<V, O>): this { return this; }
+    alphaRename(oldVar: V, newVar: V): this {
+        return this;
+    }
+
+    substitute(oldVar: V, term: GenericTerm<V, O>): this { return this; }
 
     matches(predicate: P, terms: Array<T>): boolean { return false; }
 }
 
-class UnaryConnective<V, P, C, Q, O, T extends GenericTerm<V, O>> implements GenericFormula<V, P, C, Q, O, T> {
+class UnaryConnective<V extends IVariable<V>, P, C, Q, O, T extends GenericTerm<V, O>> implements GenericFormula<V, P, C, Q, O, T> {
     constructor(readonly connective: C, readonly formula: GenericFormula<V, P, C, Q , O, T>) { }
     match<A>(predicateCase: (predicate: P, ...terms: Array<T>) => A,
              nullaryCase: (connective: C) => A,
@@ -174,18 +240,32 @@ class UnaryConnective<V, P, C, Q, O, T extends GenericTerm<V, O>> implements Gen
         return {c: this.connective, r: this.formula.toJson()};
     }
 
+    toDisplayString(topLevel: boolean): string { 
+        if(topLevel) {
+            return this.connective + this.formula.toDisplayString(false);
+        } else {
+            return '(' + this.connective + this.formula.toDisplayString(false) + ')';
+        }
+    }   
+
     freeVariables(): Set<V> {
         return this.formula.freeVariables();
     }
 
-    substitute(f: (v: V) => GenericTerm<V, O>): this {
-        return new UnaryConnective(this.connective, this.formula.substitute(f)) as this;
+    alphaRename(oldVar: V, newVar: V): this {
+        if(!this.freeVariables().has(oldVar)) return this;
+        return new UnaryConnective(this.connective, this.formula.alphaRename(oldVar, newVar)) as this;
+    }
+
+    substitute(oldVar: V, term: GenericTerm<V, O>): this {
+        if(!this.freeVariables().has(oldVar)) return this;
+        return new UnaryConnective(this.connective, this.formula.substitute(oldVar, term)) as this;
     }
 
     matches(predicate: P, terms: Array<T>): boolean { return false; }
 }
 
-class BinaryConnective<V, P, C, Q, O, T extends GenericTerm<V, O>> implements GenericFormula<V, P, C, Q, O, T> {
+class BinaryConnective<V extends IVariable<V>, P, C, Q, O, T extends GenericTerm<V, O>> implements GenericFormula<V, P, C, Q, O, T> {
     constructor(readonly leftFormula: GenericFormula<V, P, C, Q, O, T>, readonly connective: C, readonly rightFormula: GenericFormula<V, P, C, Q, O, T>) { }
     match<A>(predicateCase: (predicate: P, ...terms: Array<T>) => A,
              nullaryCase: (connective: C) => A,
@@ -199,18 +279,32 @@ class BinaryConnective<V, P, C, Q, O, T extends GenericTerm<V, O>> implements Ge
         return {c: this.connective, l: this.leftFormula.toJson(), r: this.rightFormula.toJson()};
     }
 
+    toDisplayString(topLevel: boolean): string { 
+        if(topLevel) {
+            return this.leftFormula.toDisplayString(false) + this.connective + this.rightFormula.toDisplayString(false);
+        } else {
+            return '(' + this.leftFormula.toDisplayString(false) + this.connective + this.rightFormula.toDisplayString(false) + ')';
+        }
+    }   
+
     freeVariables(): Set<V> {
         return this.leftFormula.freeVariables().union(this.rightFormula.freeVariables());
     }
 
-    substitute(f: (v: V) => GenericTerm<V, O>): this {
-        return new BinaryConnective(this.leftFormula.substitute(f), this.connective, this.rightFormula.substitute(f)) as this;
+    alphaRename(oldVar: V, newVar: V): this {
+        if(!this.freeVariables().has(oldVar)) return this;
+        return new BinaryConnective(this.leftFormula.alphaRename(oldVar, newVar), this.connective, this.rightFormula.alphaRename(oldVar, newVar)) as this;
+    }
+
+    substitute(oldVar: V, term: GenericTerm<V, O>): this {
+        if(!this.freeVariables().has(oldVar)) return this;
+        return new BinaryConnective(this.leftFormula.substitute(oldVar, term), this.connective, this.rightFormula.substitute(oldVar, term)) as this;
     }
 
     matches(predicate: P, terms: Array<T>): boolean { return false; }
 }
 
-class Quantifier<V, P, C, Q, O, T extends GenericTerm<V, O>> implements GenericFormula<V, P, C, Q, O, T> {
+class Quantifier<V extends IVariable<V>, P, C, Q, O, T extends GenericTerm<V, O>> implements GenericFormula<V, P, C, Q, O, T> {
     constructor(readonly quantifier: Q, readonly variable: V, readonly formula: GenericFormula<V, P, C, Q, O, T>) {}
     match<A>(predicateCase: (predicate: P, ...terms: Array<T>) => A,
              nullaryCase: (connective: C) => A,
@@ -221,16 +315,35 @@ class Quantifier<V, P, C, Q, O, T extends GenericTerm<V, O>> implements GenericF
     }
 
     toJson(): Json {
-        return {q: this.quantifier, v: this.variable, f: this.formula.toJson()};
+        return {q: this.quantifier, v: this.variable.toJson(), f: this.formula.toJson()};
     }
+
+    toDisplayString(topLevel: boolean): string { 
+        if(topLevel) {
+            return this.quantifier + this.variable.toDisplayString(false) + '.' + this.formula.toDisplayString(false);
+        } else {
+            return '(' + this.quantifier + this.variable.toDisplayString(false) + '.' + this.formula.toDisplayString(false) + ')';
+        }
+    }   
 
     freeVariables(): Set<V> {
         return this.formula.freeVariables().delete(this.variable);
     }
 
-    substitute(f: (v: V) => GenericTerm<V, O>): this {
-        // TODO: This is where we'd need to do some renaming.
-        return new Quantifier(this.quantifier, this.variable, this.formula.substitute(f)) as this;
+    alphaRename(oldVar: V, newVar: V): this {
+        if(!this.freeVariables().has(oldVar)) return this;
+        return new Quantifier(this.quantifier, this.variable, this.formula.alphaRename(oldVar, newVar)) as this;
+    }
+
+    substitute(oldVar: V, term: GenericTerm<V, O>): this {
+        if(!this.freeVariables().has(oldVar)) return this;
+        const variableContext = term.freeVariables();
+        if(variableContext.has(this.variable)) {
+            const fresh = this.variable.freshen(variableContext);
+            return new Quantifier(this.quantifier, fresh, this.formula.alphaRename(this.variable, fresh).substitute(oldVar, term)) as this;
+        } else {
+            return new Quantifier(this.quantifier, this.variable, this.formula.substitute(oldVar, term)) as this;
+        }
     }
 
     matches(predicate: P, terms: Array<T>): boolean { return false; }
@@ -248,8 +361,8 @@ function formulaFromJson(json: Json): SimpleFormula | null {
     if('q' in json) { // Quantifier case
         const q = json.q;
         if(typeof q !== 'string') return null;
-        const v = json.v;
-        if(typeof v !== 'string') return null;
+        const v = varFromJson(json.v);
+        if(v === null) return null;
         const f = formulaFromJson(json.f);
         if(f === null) return null;
         return new Quantifier(q, v, f);
@@ -272,16 +385,24 @@ function formulaFromJson(json: Json): SimpleFormula | null {
 
 /* Goals ************************************************************************************************************************************************************/
 
-interface GenericGoal<F extends ToJson> extends ToJson {
+interface GenericGoal<V extends IVariable<V>, O, F extends ToJson & Display & FreeVariables<V, GenericTerm<V, O>>> extends ToJson, Display, FreeVariables<V, GenericTerm<V, O>> {
     match<A>(f: (premises: Array<F>, consequences: Array<F>) => A): A;
     readonly premises: Array<F>;
     readonly consequences: Array<F>;
 }
 
-class Goal<F extends ToJson> implements GenericGoal<F> {
+class Goal<V extends IVariable<V>, O, F extends ToJson & Display & FreeVariables<V, GenericTerm<V, O>>> implements GenericGoal<V, O, F> {
     constructor(readonly premises: Array<F>, readonly consequences: Array<F>) {}
     match<A>(f: (premises: Array<F>, consequences: Array<F>) => A): A {
         return f(this.premises, this.consequences);
+    }
+
+    freeVariables(): Set<V> {
+        return Set.union(this.premises.map(p => p.freeVariables()).concat(this.consequences.map(c => c.freeVariables())));
+    }
+
+    toDisplayString(topLevel: boolean): string { 
+        return this.premises.map(p => p.toDisplayString(true)).join(', ') + ' ⊢ ' + this.consequences.map(c => c.toDisplayString(true)).join(', ');
     }
 
     toJson(): Json {
@@ -321,14 +442,14 @@ export class Lexer {
     static readonly EXISTS_TOKEN = 'EXISTS';
 
     private static readonly lexTable = {
-        [Lexer.NAME_TOKEN]: /^\s*([a-zA-Z][a-zA-Z0-9]*)/giu,
+        [Lexer.NAME_TOKEN]: /^\s*([a-zA-Z][a-zA-Z0-9]*(_[0-9]+)?)/giu,
         [Lexer.LPAREN_TOKEN]: /^\s*(\()/giu,
         [Lexer.RPAREN_TOKEN]: /^\s*(\))/giu,
         [Lexer.COMMA_TOKEN]: /^\s*(,)/giu,
         [Lexer.PERIOD_TOKEN]: /^\s*(\.)/giu,
         [Lexer.TURNSTILE_TOKEN]: /^\s*(\|-|⊢)/giu,
-        [Lexer.BOT_TOKEN]: /^\s*(_\|_|⊥)/giu,
-        [Lexer.TOP_TOKEN]: /^\s*(⊤)/giu, // TODO: ASCII version?
+        [Lexer.BOT_TOKEN]: /^\s*(false|_\|_|⊥)/giu,
+        [Lexer.TOP_TOKEN]: /^\s*(true|⊤)/giu, // TODO: ASCII version?
         [Lexer.NOT_TOKEN]: /^\s*(~|¬)/giu,
         [Lexer.AND_TOKEN]: /^\s*(\/\\|∧)/giu,
         [Lexer.OR_TOKEN]: /^\s*(\\\/|∨)/giu,
@@ -363,6 +484,8 @@ export class Lexer {
             const s = nameResult[1];
             if(/^forall$/i.test(s)) return [Lexer.FORALL_TOKEN, s];
             if(/^exists$/i.test(s)) return [Lexer.EXISTS_TOKEN, s];
+            if(/^true/i.test(s)) return [Lexer.TOP_TOKEN, s];
+            if(/^false/i.test(s)) return [Lexer.BOT_TOKEN, s];
             return [Lexer.NAME_TOKEN, s];
         } else {
             for(const reName in Lexer.lexTable) {
@@ -385,7 +508,18 @@ export class Lexer {
 
 /* Parser ***********************************************************************************************************************************************************/
 
+// TODO: Improve parser to handle conventional precedence rules.
 // TODO: Improve error messages.
+
+function parseVariable(v: string): Var | null {
+    const components = v.split('_');
+    if(components.length !== 1 && components.length !== 2) return null;
+    try {
+        return new Var(components[0], components[1] === void(0) ? -1 : parseInt(components[1], 10));
+    } catch(SyntaxError) {
+        return null;
+    }
+}
 
 /*
 Term ::= NAME (LPAREN TermList RPAREN)?
@@ -396,7 +530,11 @@ function parseTerm(lexer: Lexer): SimpleTerm | null {
     if(nameToken === null || nameToken[0] !== Lexer.NAME_TOKEN) return null;
     const lparenToken = lexer.next();
     if(lparenToken === 'error') return null;
-    if(lparenToken === 'done' || lparenToken[0] !== Lexer.LPAREN_TOKEN) return new Variable(nameToken[1]);
+    if(lparenToken === 'done' || lparenToken[0] !== Lexer.LPAREN_TOKEN) {
+        const v = parseVariable(nameToken[1]);
+        if(v === null) return null;
+        return new Variable(v);
+    }
     lexer.next();
     const terms = parseTermList(lexer);
     if(terms === null) return null;
@@ -459,7 +597,9 @@ function parseFormula(lexer: Lexer): SimpleFormula | null {
             lexer.next();
             const formula = parseAtomicFormula(lexer);
             if(formula === null) return null;
-            return new Quantifier(leadToken[0] === Lexer.FORALL_TOKEN ? FORALL_SYMBOL : EXISTS_SYMBOL, nameToken[1], formula);
+            const v = parseVariable(nameToken[1]);
+            if(v === null) return null;
+            return new Quantifier(leadToken[0] === Lexer.FORALL_TOKEN ? FORALL_SYMBOL : EXISTS_SYMBOL, v, formula);
         default:
             const lf = parseAtomicFormula(lexer);
             if(lf === null) return null;
@@ -673,16 +813,42 @@ class InferenceExtender implements DerivationExtender {
 
 /* Rendering ********************************************************************************************************************************************************/
 
-type Var = string;
+class Var implements ValueObject, IVariable<Var> {
+    constructor(readonly name: string, readonly subscript: number = -1) {}
+
+    equals(other: Var): boolean {
+        return this.name === other.name && this.subscript === other.subscript;
+    }
+
+    toJson(): Json {
+        return this.subscript === -1 ? this.name : this.name+'.'+this.subscript;
+    }
+
+    toDisplayString(): string { return this.name; } // NOTE: Shouldn't need subscript...
+
+    hashCode(): number {
+        return (hash(this.name) + hash(this.subscript)) | 0;
+    }
+
+    freshen(variableContext: Set<Var>): Var {
+        // TODO: Could probably be smarter than this...
+        let sub = this.subscript + 1;
+        let v = new Var(this.name, sub);
+        while(variableContext.has(v)) { 
+            v = new Var(this.name, ++sub);
+        }
+        return v;
+    }
+}
 
 type SimpleTerm = GenericTerm<Var, string>;
 type SimpleFormula = GenericFormula<Var, string, string, string, string, SimpleTerm>;
-type SimpleGoal = GenericGoal<SimpleFormula>;
+type SimpleGoal = GenericGoal<Var, string, SimpleFormula>;
 type SimpleDerivation = GenericDerivation<SimpleGoal>;
 
 function renderTerm(t: SimpleTerm): Element {
     return t.match(
-        v => wire()`<span class="occurrence">${v}</span>`,
+        v => wire()`<span class="occurrence">${v.name}${v.subscript !== -1 ? [wire()`<sub>${v.subscript}</sub>`] : []}</span>`,
         (o, ...ts) => wire()`<span class="operator">${o}</span>(${
                                 ts.flatMap((t, i) => i+1 === ts.length ? [renderTerm(t)] : [renderTerm(t), wire()`, `])
                              })`);
@@ -712,7 +878,7 @@ function renderFormula(f: SimpleFormula, path: Path, inPremises: boolean, extend
                                       }</div>`,
             (q, v, f) => wire(f, id)`<div id="${id}" data=${extraData} class="formula topLevel quantifier"><!--
                                      --><span class="connective quantifier">${q}</span><!--
-                                     --><span class="boundVariable">${v}</span><!--
+                                     --><span class="boundVariable">${v.name}${v.subscript !== -1 ? [wire()`<sub>${v.subscript}</sub>`] : []}</span><!--
                                      --><span class="quantifierSeparator">.</span>${
                                         renderFormula(f, path.extend(1), inPremises)
                                     }</div>`);
@@ -736,7 +902,7 @@ function renderFormula(f: SimpleFormula, path: Path, inPremises: boolean, extend
                                       })</div>`,
             (q, v, f) => wire(f, id)`<div id="${id}" class="formula quantifier">(<!--
                                      --><span class="connective quantifier">${q}</span><!--
-                                     --><span class="boundVariable">${v}</span><!--
+                                     --><span class="boundVariable">${v.name}${v.subscript !== -1 ? [wire()`<sub>${v.subscript}</sub>`] : []}</span><!--
                                      --><span class="quantifierSeparator">.</span>${
                                         renderFormula(f, path.extend(1), inPremises)
                                     })</div>`);
@@ -754,7 +920,7 @@ function renderGoal(g: SimpleGoal, path: Path, extender: DerivationExtender): El
                           ps.flatMap((p, i) => i === psLenm1 ? [renderFormula(p, path.extend(i), true, extender)] 
                                                              : [renderFormula(p, path.extend(i), true, extender), wire()`, `])
                     }</div>`
-            }<span class="turnstile" data=${{extender: extender}}>⊢</span>${
+            }<span class="turnstile" title="reset" data=${{extender: extender}}>⊢</span>${ // TODO: Only show title text for active elements.
             wire(cs, id)`<div id="${id+"consequences"}" class="consequences context">${
                             cs.flatMap((c, i) => i === csLenm1 ? [renderFormula(c, path.extend(i+psLen), false, extender)]
                                                                : [renderFormula(c, path.extend(i+psLen), false, extender), wire()`, `])
@@ -781,10 +947,36 @@ function renderDerivation(d: SimpleDerivation, path: Path, extender: DerivationE
                                     return renderDerivation(p, path.extend(i), newExtender, i === 0);
                                  })
                             }</div><!--
-                         --><div class="tag">${n}</div><!--
+                         --><div class="tag" title="${renderTagTitle(n)}">${n}</div><!--
                          --><div class="row ruleConclusion">${
                                 renderGoal(c, path.extend(ps.length), extender)
                             }</div></div>`);
+}
+
+const tagNameToDescription: {[name: string]: string} = {
+    "Ax": "axiom",
+    "⊤L": "top left",
+    "⊤R": "top right",
+    "⊥L": "bottom left (ex falso quodlibet, principle of explosion)",
+    "⊥R": "bottom right",
+    "¬L": "left negation (resolution)",
+    "¬R": "right negation (negation introduction)",
+    "∧L": "left conjuction",
+    "∧R": "right conjuction",
+    "∨L": "left disjunction",
+    "∨R": "right disjunction",
+    "⇒L": "left implication (material implication)",
+    "⇒R": "right implication (detachment)",
+    "∀L": "left univers (universal instantiation)",
+    "∀R": "right universal (universal generalization)",
+    "∃L": "left existential",
+    "∃R": "right existential (existential instantiation)",
+    "CL": "left contraction",
+    "CR": "right contraction"
+};  
+
+function renderTagTitle(name: string): string {
+    return tagNameToDescription[name] || '';
 }
 
 /* Helpers **********************************************************************************************************************************************************/
@@ -835,8 +1027,8 @@ function exists(v: Var, f: SimpleFormula): SimpleFormula {
 
 function open(conclusion: SimpleGoal): SimpleDerivation { return new OpenDerivation<SimpleGoal>(conclusion); }
 
-function entails(premises: Array<SimpleFormula>, consequences: Array<SimpleFormula>): Goal<SimpleFormula> {
-    return new Goal<SimpleFormula>(premises, consequences);
+function entails(premises: Array<SimpleFormula>, consequences: Array<SimpleFormula>): Goal<Var, string, SimpleFormula> {
+    return new Goal<Var, string, SimpleFormula>(premises, consequences);
 }
 
 function infers(name: string, premises: Array<SimpleDerivation>, conclusion: SimpleGoal): Inference<SimpleGoal> {
@@ -1002,16 +1194,19 @@ const classicalSequentCalculus: Logic = (input) => input.match(
         },
         (quantifier, v, f2) => { 
             switch(quantifier) {
-                // TODO: Variable renaming shenanigans should occur here-ish.
                 case FORALL_SYMBOL:
                     if(inPremises) {
                         return new ContractOrInstantiate(goal, formula, inPremises);
                     } else {
-                        return new NewGoals('∀R', [new Goal(goal.premises, goal.consequences.filter(f => f !== formula).concat(f2))]);
+                        const variableContext = goal.freeVariables();
+                        const f3 = variableContext.has(v) ? f2.alphaRename(v, v.freshen(variableContext)) : f2;
+                        return new NewGoals('∀R', [new Goal(goal.premises, goal.consequences.filter(f => f !== formula).concat(f3))]);
                     }
                 case EXISTS_SYMBOL:
                     if(inPremises) {
-                        return new NewGoals('∃L', [new Goal(goal.premises.filter(f => f !== formula).concat(f2), goal.consequences)]);
+                        const variableContext = goal.freeVariables();
+                        const f3 = variableContext.has(v) ? f2.alphaRename(v, v.freshen(variableContext)) : f2;
+                        return new NewGoals('∃L', [new Goal(goal.premises.filter(f => f !== formula).concat(f3), goal.consequences)]);
                     } else {
                         return new ContractOrInstantiate(goal, formula, inPremises);
                     }
@@ -1027,24 +1222,31 @@ const classicalSequentCalculus: Logic = (input) => input.match(
         }
     },
     (goal, formula, inPremises, term) => { 
-        if(!(formula instanceof Quantifier)) throw 'Non-quantified expression not expected.';
+        if(!(formula instanceof Quantifier)) throw 'Quantified formula expected.';
         // NOTE: Can't be as gung-ho about filtering out the original formulas from the contexts due to contraction.
 
         if(inPremises) { // then forall case
-        
+            let first = 0; // HACK: Horrible hack
+            const f2 = formula.formula.substitute(formula.variable, term);
+            return new NewGoals('∀L', [new Goal(goal.premises.filter(f => f !== formula || first++ !== 0).concat(f2), 
+                                                goal.consequences)]);
         } else { // exists case
-        
+            let first = 0; // HACK: Horrible hack
+            const f2 = formula.formula.substitute(formula.variable, term);
+            return new NewGoals('∃R', [new Goal(goal.premises,
+                                                goal.consequences.filter(f => f !== formula || first++ !== 0).concat(f2))]);
         }
-        throw 'Not implemented yet.';
     });
 
 /* Main *************************************************************************************************************************************************************/
 
 const A = predicate('A');
 const B = predicate('B');
+const x = new Var('x');
+const y = new Var('y');
 
-let example: SimpleDerivation = open(entails([], [implies(implies(implies(A, B), A), A)]));
-//let example: SimpleDerivation = open(entails([exists('x', forall('y', predicate('P', variable('x'), variable('y'))))], [forall('x', exists('y', predicate('P', variable('x'), variable('y'))))]));
+//let example: SimpleDerivation = open(entails([], [implies(implies(implies(A, B), A), A)]));
+let example: SimpleDerivation = open(entails([forall(x, forall(y, predicate('P', variable(x), variable(y))))], [exists(x, exists(y, predicate('P', variable(x), variable(y))))]));
 
 const container = document.getElementById('container');
 const toast = document.getElementById('toast');
@@ -1061,20 +1263,25 @@ if(termBtn === null) throw 'Term button missing.';
 if(contractBtn === null) throw 'Contract button missing.';
 if(container === null) throw 'Container missing.';
 
-const derivationJson = JSON.parse(decodeURIComponent(location.hash.slice(1)));
-if(derivationJson !== void(0)) {
-    const json = expandCse(derivationJson);
-    const derivation = derivationFromJson(json);
-    if(derivation !== null) {
-        example = derivation;
-    } else {
-        // TODO: Remove else case
-        console.log({expanded: json, unexpanded: derivationJson, string: location.hash.slice(1)});
-    }
-}
+const derivationFromHash = () => {
+    try {
+        const derivationJson = JSON.parse(decodeURIComponent(location.hash.slice(1)));
+        if(derivationJson !== void(0)) {
+            const json = expandCse(derivationJson);
+            const derivation = derivationFromJson(json);
+            if(derivation !== null) {
+                example = derivation;
+                (goalInput as any).value = '';
+            } else {
+                console.log({expanded: json, unexpanded: derivationJson, string: location.hash.slice(1)});
+            }
+        }
+    } catch(SyntaxError) {} // Ignore SyntaxErrors
+};
 
-const refresh = () => {
-    location.hash = '#'+encodeURIComponent(JSON.stringify(cse(example.toJson())));
+const refresh = (changeHash: boolean = true) => {
+    document.title = 'Proving ' + example.conclusion.toDisplayString(true);
+    if(changeHash) location.hash = '#'+encodeURIComponent(JSON.stringify(cse(example.toJson())));
     bind(container)`${renderDerivation(example, new StartPath('root.'), new GoalExtender(example.conclusion), true, true)}`;
 };
 
@@ -1103,6 +1310,7 @@ const onClick = (event: MouseEvent) => {
                 popup.style.left = (event.pageX-45) + 'px';
                 popup.style.top = (event.pageY-40) + 'px';
                 popup.className = 'shown';
+                termInput.focus();
                 return example;
             });
     }
@@ -1150,16 +1358,17 @@ const onGoalInput = (event: Event) => {
     }
 };
 
-
-
 const onAnimationEnd = (event: Event) => toast.className = '';
-const onMouseLeave = (event: Event) => { (popup as any).data = void(0); popup.className = ''; }
+const onMouseLeave = (event: Event) => { (popup as any).data = void(0); popup.className = ''; };
+const onHashChange = (event: Event) => { derivationFromHash(); refresh(false); };
 
 const scheduler = newDefaultScheduler();
 runEffects(tap(onClick, click(container, true)), scheduler);
 runEffects(tap(onTermInput, merge(change(termInput), merge(click(termBtn), click(contractBtn)))), scheduler);
 runEffects(tap(onGoalInput, change(goalInput)), scheduler);
-runEffects(tap(onAnimationEnd, domEvent('animationend', toast, false)), scheduler);
-runEffects(tap(onMouseLeave, mouseleave(popup, false)), scheduler);
+runEffects(tap(onAnimationEnd, domEvent('animationend', toast)), scheduler);
+runEffects(tap(onMouseLeave, mouseleave(popup)), scheduler);
+runEffects(tap(onHashChange, hashchange(window)), scheduler);
 
-refresh();
+derivationFromHash();
+refresh(false);
