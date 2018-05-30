@@ -893,7 +893,7 @@ function renderFormula(f: SimpleFormula, path: Path, inPremises: boolean, extend
                                            }${ts.length === 0 ? '' : ')'}</span></div>`,
             c => wire(f, id)`<div id="${id}" class="formula"><span class="connective nullary">${c}</span></div>`,
             (c, f) => wire(f, id)`<div id="${id}" class="formula">(<!--
-                                     --><span class="connective unary">${c}</span>r${
+                                     --><span class="connective unary">${c}</span>${
                                         renderFormula(f, path.extend(1), inPremises)
                                  })</div>`,
             (lf, c, rf) => wire(f, id)`<div id="${id}" class="formula">(${
