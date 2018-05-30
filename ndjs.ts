@@ -3,7 +3,8 @@ import { runEffects, tap, merge } from "@most/core";
 import { click, domEvent, mouseleave, change, hashchange } from "@most/dom-event";
 import { newDefaultScheduler } from "@most/scheduler";
 import { Set, ValueObject, hash } from "immutable";
-import { cse, expandCse } from "./json-with-sharing"
+import { cse, expandCse } from "./json-with-sharing";
+import { compressToEncodedURIComponent, decompressFromEncodedURIComponent } from "lz-string";
 
 type Json = any;
 
@@ -1115,6 +1116,10 @@ class ContractOrInstantiate implements OutputEvent {
 
 type Logic = (input: InputEvent) => OutputEvent;
 
+// Use LJT, the system used by Logitext and Djinn and described in "Contraction-Free Sequent Calculi for Intuitionistic Logic", to handle intuitionistic logic.
+// Supporting this will require some changes to the user interface.
+// Handling natural deduction is awkward because the elimination rules have the connective in the premises. The user interface would
+// be something like clicking on a formula, and then choosing a connective that was eliminated to produce that formula.
 const classicalSequentCalculus: Logic = (input) => input.match(
     (goal, formula, inPremises) => formula.match<OutputEvent>( // TODO: Refactor and finish.
         (predicate, ...terms) => { 
@@ -1245,8 +1250,8 @@ const B = predicate('B');
 const x = new Var('x');
 const y = new Var('y');
 
-//let example: SimpleDerivation = open(entails([], [implies(implies(implies(A, B), A), A)]));
-let example: SimpleDerivation = open(entails([forall(x, forall(y, predicate('P', variable(x), variable(y))))], [exists(x, exists(y, predicate('P', variable(x), variable(y))))]));
+let example: SimpleDerivation = open(entails([], [implies(implies(implies(A, B), A), A)]));
+//let example: SimpleDerivation = open(entails([forall(x, forall(y, predicate('P', variable(x), variable(y))))], [exists(x, exists(y, predicate('P', variable(x), variable(y))))]));
 
 const container = document.getElementById('container');
 const toast = document.getElementById('toast');
@@ -1265,7 +1270,8 @@ if(container === null) throw 'Container missing.';
 
 const derivationFromHash = () => {
     try {
-        const derivationJson = JSON.parse(decodeURIComponent(location.hash.slice(1)));
+        // Compress and decompress? http://lzma-js.github.io/LZMA-JS/ or http://pieroxy.net/blog/pages/lz-string/index.html
+        const derivationJson = JSON.parse(decompressFromEncodedURIComponent(location.hash.slice(1)));
         if(derivationJson !== void(0)) {
             const json = expandCse(derivationJson);
             const derivation = derivationFromJson(json);
@@ -1281,7 +1287,7 @@ const derivationFromHash = () => {
 
 const refresh = (changeHash: boolean = true) => {
     document.title = 'Proving ' + example.conclusion.toDisplayString(true);
-    if(changeHash) location.hash = '#'+encodeURIComponent(JSON.stringify(cse(example.toJson())));
+    if(changeHash) location.hash = '#'+compressToEncodedURIComponent(JSON.stringify(cse(example.toJson())));
     bind(container)`${renderDerivation(example, new StartPath('root.'), new GoalExtender(example.conclusion), true, true)}`;
 };
 
