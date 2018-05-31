@@ -120,7 +120,7 @@ class Operator<V extends IVariable<V>, O> implements GenericTerm<V, O> {
     equals(other: GenericTerm<V, O>): boolean {
         return other.match(
                     v => false,
-                    (o, ...ts) => o === this.operator 
+                    (o, ...ts) => o === this.operator
                                && this.terms.length === ts.length
                                && ts.every((t, i) => t.equals(this.terms[i])));
     }
@@ -175,7 +175,9 @@ class Predicate<V extends IVariable<V>, P, C, Q, O, T extends GenericTerm<V, O>>
         return [this.predicate].concat(this.terms.map(t => t.toJson()));
     }
 
-    toDisplayString(topLevel: boolean): string { return this.predicate+'('+this.terms.map(t => t.toDisplayString(true)).join(', ')+')'; }
+    toDisplayString(topLevel: boolean): string {
+        return this.terms.length === 0 ? ''+this.predicate : this.predicate+'('+this.terms.map(t => t.toDisplayString(true)).join(', ')+')';
+    }
 
     freeVariables(): Set<V> {
         return Set.union(this.terms.map(t => t.freeVariables()));
@@ -191,7 +193,7 @@ class Predicate<V extends IVariable<V>, P, C, Q, O, T extends GenericTerm<V, O>>
         return new Predicate(this.predicate, ...this.terms.map(t => t.substitute(oldVar, term))) as this;
     }
 
-    matches(predicate: P, terms: Array<T>): boolean { 
+    matches(predicate: P, terms: Array<T>): boolean {
         return this.predicate === predicate
             && this.terms.length === terms.length
             && terms.every((t, i) => t.equals(this.terms[i]));
@@ -241,13 +243,13 @@ class UnaryConnective<V extends IVariable<V>, P, C, Q, O, T extends GenericTerm<
         return {c: this.connective, r: this.formula.toJson()};
     }
 
-    toDisplayString(topLevel: boolean): string { 
+    toDisplayString(topLevel: boolean): string {
         if(topLevel) {
             return this.connective + this.formula.toDisplayString(false);
         } else {
             return '(' + this.connective + this.formula.toDisplayString(false) + ')';
         }
-    }   
+    }
 
     freeVariables(): Set<V> {
         return this.formula.freeVariables();
@@ -280,13 +282,13 @@ class BinaryConnective<V extends IVariable<V>, P, C, Q, O, T extends GenericTerm
         return {c: this.connective, l: this.leftFormula.toJson(), r: this.rightFormula.toJson()};
     }
 
-    toDisplayString(topLevel: boolean): string { 
+    toDisplayString(topLevel: boolean): string {
         if(topLevel) {
             return this.leftFormula.toDisplayString(false) + this.connective + this.rightFormula.toDisplayString(false);
         } else {
             return '(' + this.leftFormula.toDisplayString(false) + this.connective + this.rightFormula.toDisplayString(false) + ')';
         }
-    }   
+    }
 
     freeVariables(): Set<V> {
         return this.leftFormula.freeVariables().union(this.rightFormula.freeVariables());
@@ -319,13 +321,13 @@ class Quantifier<V extends IVariable<V>, P, C, Q, O, T extends GenericTerm<V, O>
         return {q: this.quantifier, v: this.variable.toJson(), f: this.formula.toJson()};
     }
 
-    toDisplayString(topLevel: boolean): string { 
+    toDisplayString(topLevel: boolean): string {
         if(topLevel) {
             return this.quantifier + this.variable.toDisplayString(false) + '.' + this.formula.toDisplayString(false);
         } else {
             return '(' + this.quantifier + this.variable.toDisplayString(false) + '.' + this.formula.toDisplayString(false) + ')';
         }
-    }   
+    }
 
     freeVariables(): Set<V> {
         return this.formula.freeVariables().delete(this.variable);
@@ -402,7 +404,7 @@ class Goal<V extends IVariable<V>, O, F extends ToJson & Display & FreeVariables
         return Set.union(this.premises.map(p => p.freeVariables()).concat(this.consequences.map(c => c.freeVariables())));
     }
 
-    toDisplayString(topLevel: boolean): string { 
+    toDisplayString(topLevel: boolean): string {
         return this.premises.map(p => p.toDisplayString(true)).join(', ') + ' ⊢ ' + this.consequences.map(c => c.toDisplayString(true)).join(', ');
     }
 
@@ -835,7 +837,7 @@ class Var implements ValueObject, IVariable<Var> {
         // TODO: Could probably be smarter than this...
         let sub = this.subscript + 1;
         let v = new Var(this.name, sub);
-        while(variableContext.has(v)) { 
+        while(variableContext.has(v)) {
             v = new Var(this.name, ++sub);
         }
         return v;
@@ -918,7 +920,7 @@ function renderGoal(g: SimpleGoal, path: Path, extender: DerivationExtender): El
         const csLenm1 = cs.length - 1;
         return wire(g, id)`<div id="${id}" class="goal">${
             wire(ps, id)`<div id="${id+"premises"}" class="premises context">${
-                          ps.flatMap((p, i) => i === psLenm1 ? [renderFormula(p, path.extend(i), true, extender)] 
+                          ps.flatMap((p, i) => i === psLenm1 ? [renderFormula(p, path.extend(i), true, extender)]
                                                              : [renderFormula(p, path.extend(i), true, extender), wire()`, `])
                     }</div>`
             }<span class="turnstile" title="reset" data=${{extender: extender}}>⊢</span>${ // TODO: Only show title text for active elements.
@@ -935,7 +937,7 @@ function renderDerivation(d: SimpleDerivation, path: Path, extender: DerivationE
     const classes = (first ? 'derivation first' : 'derivation') + (root && d.isCompleted() ? ' completed' : '');
     return d.match(
         c => wire(d, id)`<div id="${id}" class="${classes + ' open'}">${renderGoal(c, path/*TODO:extend(0)*/, extender)}</div>`,
-        (n, ps, c) => 
+        (n, ps, c) =>
             wire(d, id)`<div id="${id}" class="${classes + ' closed'}"><!--
                          --><div class="row rulePremise">${
                                 ps.map((p, i) => {
@@ -974,7 +976,7 @@ const tagNameToDescription: {[name: string]: string} = {
     "∃R": "right existential (existential instantiation)",
     "CL": "left contraction",
     "CR": "right contraction"
-};  
+};
 
 function renderTagTitle(name: string): string {
     return tagNameToDescription[name] || '';
@@ -1117,12 +1119,13 @@ class ContractOrInstantiate implements OutputEvent {
 type Logic = (input: InputEvent) => OutputEvent;
 
 // Use LJT, the system used by Logitext and Djinn and described in "Contraction-Free Sequent Calculi for Intuitionistic Logic", to handle intuitionistic logic.
+// Look at LJF from "Focusing and Polarization in Intuitionistic Logic" which contains LJT as a subsystem. This may better organize LJT.
 // Supporting this will require some changes to the user interface.
 // Handling natural deduction is awkward because the elimination rules have the connective in the premises. The user interface would
 // be something like clicking on a formula, and then choosing a connective that was eliminated to produce that formula.
 const classicalSequentCalculus: Logic = (input) => input.match(
     (goal, formula, inPremises) => formula.match<OutputEvent>( // TODO: Refactor and finish.
-        (predicate, ...terms) => { 
+        (predicate, ...terms) => {
             if(inPremises) {
                 if(goal.consequences.some(c => c.matches(predicate, terms))) {
                     return new NewGoals('Ax', []);
@@ -1137,7 +1140,7 @@ const classicalSequentCalculus: Logic = (input) => input.match(
                 }
             }
         },
-        connective => { 
+        connective => {
             switch(connective) {
                 case TOP_SYMBOL:
                     if(inPremises) {
@@ -1152,10 +1155,10 @@ const classicalSequentCalculus: Logic = (input) => input.match(
                         return new NewGoals('⊥R', [new Goal(goal.premises, goal.consequences.filter(f => f !== formula))]);
                     }
                 default:
-                    throw 'Not implemented.'; 
+                    throw 'Not implemented.';
             }
         },
-        (connective, f2) => { 
+        (connective, f2) => {
             switch(connective) {
                 case NOT_SYMBOL:
                     if(inPremises) {
@@ -1167,7 +1170,7 @@ const classicalSequentCalculus: Logic = (input) => input.match(
                     throw 'Not implemented.';
             }
         },
-        (lf, connective, rf) => { 
+        (lf, connective, rf) => {
             switch(connective) {
                 case AND_SYMBOL:
                     if(inPremises) {
@@ -1193,11 +1196,11 @@ const classicalSequentCalculus: Logic = (input) => input.match(
                     } else {
                         return new NewGoals('⇒R', [new Goal(goal.premises.concat(lf), goal.consequences.filter(f => f !== formula).concat(rf))]);
                     }
-                default: 
-                    throw 'Not implemented.'; 
+                default:
+                    throw 'Not implemented.';
             }
         },
-        (quantifier, v, f2) => { 
+        (quantifier, v, f2) => {
             switch(quantifier) {
                 case FORALL_SYMBOL:
                     if(inPremises) {
@@ -1216,7 +1219,7 @@ const classicalSequentCalculus: Logic = (input) => input.match(
                         return new ContractOrInstantiate(goal, formula, inPremises);
                     }
                 default:
-                    throw 'Not implemented.'; 
+                    throw 'Not implemented.';
             }
         }),
     (goal, formula, inPremises) => {
@@ -1226,14 +1229,14 @@ const classicalSequentCalculus: Logic = (input) => input.match(
             return new NewGoals('CR', [new Goal(goal.premises, goal.consequences.concat(formula))]);
         }
     },
-    (goal, formula, inPremises, term) => { 
+    (goal, formula, inPremises, term) => {
         if(!(formula instanceof Quantifier)) throw 'Quantified formula expected.';
         // NOTE: Can't be as gung-ho about filtering out the original formulas from the contexts due to contraction.
 
         if(inPremises) { // then forall case
             let first = 0; // HACK: Horrible hack
             const f2 = formula.formula.substitute(formula.variable, term);
-            return new NewGoals('∀L', [new Goal(goal.premises.filter(f => f !== formula || first++ !== 0).concat(f2), 
+            return new NewGoals('∀L', [new Goal(goal.premises.filter(f => f !== formula || first++ !== 0).concat(f2),
                                                 goal.consequences)]);
         } else { // exists case
             let first = 0; // HACK: Horrible hack
