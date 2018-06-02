@@ -425,6 +425,15 @@ function goalFromJson(json: Json): SimpleGoal | null {
 
 /* Lexer ************************************************************************************************************************************************************/
 
+const BOT_SYMBOL = '⊥';
+const TOP_SYMBOL = '⊤';
+const NOT_SYMBOL = '¬';
+const AND_SYMBOL = '∧';
+const OR_SYMBOL = '∨';
+const IMP_SYMBOL = '⇒';
+const FORALL_SYMBOL = '∀';
+const EXISTS_SYMBOL = '∃';
+
 type TokenType = 'NAME' | 'LPAREN' | 'RPAREN' | 'COMMA' | 'PERIOD' | 'TURNSTILE' | 'BOTTOM' | 'TOP' | 'NOT' | 'AND' | 'OR' | 'IMPLIES' | 'FORALL' | 'EXISTS';
 type Token = [TokenType, string];
 
@@ -525,9 +534,9 @@ function parseVariable(v: string): Var | null {
 }
 
 /*
-Term ::= NAME (LPAREN TermList RPAREN)?
-TermList ::= Term (COMMA Term)*
-*/
+   Term ::= NAME (LPAREN TermList RPAREN)?
+   TermList ::= Term (COMMA Term)*
+ */
 function parseTerm(lexer: Lexer): SimpleTerm | null {
     const nameToken = lexer.peek();
     if(nameToken === null || nameToken[0] !== Lexer.NAME_TOKEN) return null;
@@ -569,93 +578,109 @@ function termFromString(s: string): SimpleTerm | null {
 }
 
 /*
- NullaryConnective ::= TOP | BOTTOM
- UnaryConnective ::= NOT
- BinaryConnective ::= AND | OR | IMP
- Quantifier ::= FORALL | EXISTS
- AtomicFormula ::= NAME (LPAREN TermList RPAREN)?
-                 | NullaryConnective
-                 | LPAREN Formula RPAREN
- Formula ::= AtamicFormula FormulaTail
-           | UnaryConnective AtomicFormula
-           | Quantifier NAME PERIOD AtomicFormula
- FormulaTail ::= BinaryConnective AtomicFormula
-               | EMPTY
-*/
+   NullaryConnective ::= TOP | BOTTOM
+   UnaryConnective ::= NOT
+   BinaryConnective ::= AND | OR | IMP
+   Quantifier ::= FORALL | EXISTS
+   AtomicFormula ::= NAME (LPAREN TermList RPAREN)?
+   | NullaryConnective
+   | LPAREN Formula RPAREN
+   Formula ::= AtamicFormula FormulaTail
+   | UnaryConnective AtomicFormula
+   | Quantifier NAME PERIOD AtomicFormula
+   FormulaTail ::= BinaryConnective AtomicFormula
+   | EMPTY
+ */
+const nullaryConnectives: {[token: string]: string | undefined} = {
+    [Lexer.TOP_TOKEN]: TOP_SYMBOL,
+    [Lexer.BOT_TOKEN]: BOT_SYMBOL
+};
+const unaryConnectives: {[token: string]: string | undefined} = {
+    [Lexer.NOT_TOKEN]: NOT_SYMBOL
+};
+const binaryConnectives: {[token: string]: string | undefined} = {
+    [Lexer.AND_TOKEN]: AND_SYMBOL,
+    [Lexer.OR_TOKEN]: OR_SYMBOL,
+    [Lexer.IMP_TOKEN]: IMP_SYMBOL
+};
+const quantifiers: {[token: string]: string | undefined} = {
+    [Lexer.FORALL_TOKEN]: FORALL_SYMBOL,
+    [Lexer.EXISTS_TOKEN]: EXISTS_SYMBOL
+};
+
+
 function parseFormula(lexer: Lexer): SimpleFormula | null {
     const leadToken = lexer.peek();
     if(leadToken === null) return null;
-    switch(leadToken[0]) {
-        case Lexer.NOT_TOKEN:
-            lexer.next();
-            const f = parseAtomicFormula(lexer);
-            if(f === null) return null;
-            return new UnaryConnective(NOT_SYMBOL, f);
-        case Lexer.FORALL_TOKEN:
-        case Lexer.EXISTS_TOKEN:
-            const nameToken = lexer.next();
-            if(nameToken === 'done' || nameToken === 'error' || nameToken[0] !== Lexer.NAME_TOKEN) return null;
-            const periodToken = lexer.next();
-            if(periodToken === 'done' || periodToken === 'error' || periodToken[0] !== Lexer.PERIOD_TOKEN) return null;
-            lexer.next();
-            const formula = parseAtomicFormula(lexer);
-            if(formula === null) return null;
-            const v = parseVariable(nameToken[1]);
-            if(v === null) return null;
-            return new Quantifier(leadToken[0] === Lexer.FORALL_TOKEN ? FORALL_SYMBOL : EXISTS_SYMBOL, v, formula);
-        default:
-            const lf = parseAtomicFormula(lexer);
-            if(lf === null) return null;
-            const rf = parseFormulaTail(lexer);
-            if(rf === null) return lf;
-            const conn = rf[0] === Lexer.AND_TOKEN ? AND_SYMBOL : rf[0] === Lexer.OR_TOKEN ? OR_SYMBOL : IMP_SYMBOL;
-            return new BinaryConnective(lf, conn, rf[1]);
+    const tokenType = leadToken[0];
+    if(unaryConnectives[tokenType] !== void(0)) {
+        lexer.next();
+        const f = parseAtomicFormula(lexer);
+        if(f === null) return null;
+        return new UnaryConnective(unaryConnectives[tokenType] as string, f);
+    } else if(quantifiers[tokenType] !== void(0)) {
+        const nameToken = lexer.next();
+        if(nameToken === 'done' || nameToken === 'error' || nameToken[0] !== Lexer.NAME_TOKEN) return null;
+        const periodToken = lexer.next();
+        if(periodToken === 'done' || periodToken === 'error' || periodToken[0] !== Lexer.PERIOD_TOKEN) return null;
+        lexer.next();
+        const formula = parseAtomicFormula(lexer);
+        if(formula === null) return null;
+        const v = parseVariable(nameToken[1]);
+        if(v === null) return null;
+        return new Quantifier(quantifiers[tokenType] as string, v, formula);
+    } else {
+        const lf = parseAtomicFormula(lexer);
+        if(lf === null) return null;
+        const rf = parseFormulaTail(lexer);
+        if(rf === null) return lf;
+        const conn = binaryConnectives[rf[0]];
+        if(conn === void(0)) return null;
+        return new BinaryConnective(lf, conn, rf[1]);
     }
 }
 
 function parseAtomicFormula(lexer: Lexer): SimpleFormula | null {
     const leadToken = lexer.peek();
     if(leadToken === null) return null;
-    switch(leadToken[0]) {
-        case Lexer.TOP_TOKEN:
-            lexer.next();
-            return new NullaryConnective(TOP_SYMBOL);
-        case Lexer.BOT_TOKEN:
-            lexer.next();
-            return new NullaryConnective(BOT_SYMBOL);
-        case Lexer.NAME_TOKEN:
-            const lparenToken = lexer.next();
-            if(lparenToken === 'error') return null;
-            if(lparenToken === 'done' || lparenToken[0] !== Lexer.LPAREN_TOKEN) return new Predicate(leadToken[1]);
-            lexer.next();
-            const terms = parseTermList(lexer);
-            if(terms === null) return null;
-            const rparenToken = lexer.peek();
-            if(rparenToken === null || rparenToken[0] !== Lexer.RPAREN_TOKEN) return null;
-            lexer.next();
-            return new Predicate(leadToken[1], ...terms);
-        case Lexer.LPAREN_TOKEN:
-            lexer.next();
-            const formula = parseFormula(lexer);
-            if(formula === null) return null;
-            const rparenToken2 = lexer.peek();
-            if(rparenToken2 === null || rparenToken2[0] !== Lexer.RPAREN_TOKEN) return null;
-            lexer.next();
-            return formula;
-        default:
-            return null;
+    const tokenType = leadToken[0];
+    if(nullaryConnectives[tokenType] !== void(0)) {
+        lexer.next();
+        return new NullaryConnective(nullaryConnectives[tokenType] as string);
+    } else {
+        switch(tokenType) {
+            case Lexer.NAME_TOKEN:
+                const lparenToken = lexer.next();
+                if(lparenToken === 'error') return null;
+                if(lparenToken === 'done' || lparenToken[0] !== Lexer.LPAREN_TOKEN) return new Predicate(leadToken[1]);
+                lexer.next();
+                const terms = parseTermList(lexer);
+                if(terms === null) return null;
+                const rparenToken = lexer.peek();
+                if(rparenToken === null || rparenToken[0] !== Lexer.RPAREN_TOKEN) return null;
+                lexer.next();
+                return new Predicate(leadToken[1], ...terms);
+            case Lexer.LPAREN_TOKEN:
+                lexer.next();
+                const formula = parseFormula(lexer);
+                if(formula === null) return null;
+                const rparenToken2 = lexer.peek();
+                if(rparenToken2 === null || rparenToken2[0] !== Lexer.RPAREN_TOKEN) return null;
+                lexer.next();
+                return formula;
+            default:
+                return null;
+        }
     }
 }
 
-type BinaryConnectiveName = 'AND' | 'OR' | 'IMPLIES';
-
-function parseFormulaTail(lexer: Lexer): [BinaryConnectiveName, SimpleFormula] | null {
+function parseFormulaTail(lexer: Lexer): [string, SimpleFormula] | null {
     const bc = lexer.peek();
     if(bc === null || (bc[0] !== Lexer.AND_TOKEN && bc[0] !== Lexer.OR_TOKEN && bc[0] !== Lexer.IMP_TOKEN)) return null;
     lexer.next();
     const rf = parseAtomicFormula(lexer);
     if(rf === null) return null;
-    return [bc[0] as BinaryConnectiveName, rf];
+    return [bc[0], rf];
 }
 
 function formulaFromString(s: string): SimpleFormula | null {
@@ -666,9 +691,9 @@ function formulaFromString(s: string): SimpleFormula | null {
 }
 
 /*
-Goal ::= FormulaList TURNSTILE FormulaList
-FormulaList ::= Formula (COMMA Formula)*
-*/
+   Goal ::= FormulaList TURNSTILE FormulaList
+   FormulaList ::= Formula (COMMA Formula)*
+ */
 function parseGoal(lexer: Lexer, lax: boolean = true): SimpleGoal | null {
     const premises = parseFormulaList(lexer);
     if(premises === null) return null;
@@ -711,8 +736,8 @@ function goalFromString(s: string, lax: boolean = true): SimpleGoal | null {
 
 interface GenericDerivation<G extends ToJson> extends ToJson {
     match<A>(openCase: (conclusion: G) => A, inferenceCase: (name: string, premises: Array<GenericDerivation<G>>, conclusion: G) => A): A;
-    conclusion: G;
-    isCompleted(): boolean;
+conclusion: G;
+            isCompleted(): boolean;
 }
 
 class OpenDerivation<G extends ToJson> implements GenericDerivation<G> {
@@ -790,7 +815,7 @@ class ExtendPath implements Path {
 interface DerivationExtender {
     extend(name: string, premises: Array<SimpleDerivation>): SimpleDerivation;
     open(): SimpleDerivation;
-    goal: SimpleGoal;
+goal: SimpleGoal;
 }
 
 class GoalExtender implements DerivationExtender {
@@ -801,11 +826,11 @@ class GoalExtender implements DerivationExtender {
 
 class InferenceExtender implements DerivationExtender {
     constructor(
-        private readonly name: string,
-        private readonly left: Array<SimpleDerivation>,
-        readonly goal: SimpleGoal,
-        private readonly right: Array<SimpleDerivation>,
-        private readonly extender: DerivationExtender) {}
+            private readonly name: string,
+            private readonly left: Array<SimpleDerivation>,
+            readonly goal: SimpleGoal,
+            private readonly right: Array<SimpleDerivation>,
+            private readonly extender: DerivationExtender) {}
     extend(name: string, premises: Array<SimpleDerivation>): SimpleDerivation {
         return this.extender.extend(this.name, this.left.concat(new Inference(name, premises, this.goal), this.right));
     }
@@ -851,109 +876,109 @@ type SimpleDerivation = GenericDerivation<SimpleGoal>;
 
 function renderTerm(t: SimpleTerm): Element {
     return t.match(
-        v => wire()`<span class="occurrence">${v.name}${v.subscript !== -1 ? [wire()`<sub>${v.subscript}</sub>`] : []}</span>`,
-        (o, ...ts) => wire()`<span class="operator">${o}</span>(${
-                                ts.flatMap((t, i) => i+1 === ts.length ? [renderTerm(t)] : [renderTerm(t), wire()`, `])
-                             })`);
+            v => wire()`<span class="occurrence">${v.name}${v.subscript !== -1 ? [wire()`<sub>${v.subscript}</sub>`] : []}</span>`,
+            (o, ...ts) => wire()`<span class="operator">${o}</span>(${
+                ts.flatMap((t, i) => i+1 === ts.length ? [renderTerm(t)] : [renderTerm(t), wire()`, `])
+                })`);
 }
 
 // TODO: Add precedence system.
-function renderFormula(f: SimpleFormula, path: Path, inPremises: boolean, extender?: DerivationExtender): Element {
+function renderFormula(f: SimpleFormula, path: Path, inPremises: boolean, extraClasses: string, extender?: DerivationExtender): Element {
     const id = path.toString();
     if(extender !== void(0)) {
         const extraData = {extender: extender, formula: f, inPremises: inPremises};
         return f.match(
-            (p, ...ts) => wire(f, id)`<div id="${id}" data=${extraData} class="formula topLevel"><!--
-                                         --><span class="predicate"><span class="predicateSymbol">${p}</span>${
-                                                ts.length === 0 ? '' : '('}${
-                                                ts.flatMap((t, i) => i+1 === ts.length ? [renderTerm(t)]
-                                                                                       : [renderTerm(t), wire()`, `])
-                                           }${ts.length === 0 ? '' : ')'}</span></div>`,
-            c => wire(f, id)`<div id="${id}" data=${extraData} class="formula topLevel"><span class="connective nullary">${c}</span></div>`,
-            (c, f) => wire(f, id)`<div id="${id}" data=${extraData} class="formula topLevel"><!--
-                                     --><span class="connective unary">${c}</span>${
-                                        renderFormula(f, path.extend(1), inPremises)
-                                 }</div>`,
-            (lf, c, rf) => wire(f, id)`<div id="${id}" data=${extraData} class="formula topLevel">${
-                                            renderFormula(lf, path.extend(1), inPremises)
-                                           }<span class="connective binary">${c}</span>${
-                                            renderFormula(rf, path.extend(2), inPremises)
-                                      }</div>`,
-            (q, v, f) => wire(f, id)`<div id="${id}" data=${extraData} class="formula topLevel quantifier"><!--
-                                     --><span class="connective quantifier">${q}</span><!--
-                                     --><span class="boundVariable">${v.name}${v.subscript !== -1 ? [wire()`<sub>${v.subscript}</sub>`] : []}</span><!--
-                                     --><span class="quantifierSeparator">.</span>${
-                                        renderFormula(f, path.extend(1), inPremises)
-                                    }</div>`);
+                (p, ...ts) => wire(f, id)`<div id="${id}" data=${extraData} class="${'formula active '+extraClasses}"><!--
+                --><span class="predicate"><span class="predicateSymbol">${p}</span>${
+                ts.length === 0 ? '' : '('}${
+                ts.flatMap((t, i) => i+1 === ts.length ? [renderTerm(t)]
+                        : [renderTerm(t), wire()`, `])
+                }${ts.length === 0 ? '' : ')'}</span></div>`,
+                c => wire(f, id)`<div id="${id}" data=${extraData} class="${'formula active '+extraClasses}"><span class="connective nullary">${c}</span></div>`,
+                (c, f) => wire(f, id)`<div id="${id}" data=${extraData} class="${'formula active '+extraClasses}"><!--
+                --><span class="connective unary">${c}</span>${
+                renderFormula(f, path.extend(1), inPremises, '')
+                }</div>`,
+                (lf, c, rf) => wire(f, id)`<div id="${id}" data=${extraData} class="${'formula active '+extraClasses}">${
+                renderFormula(lf, path.extend(1), inPremises, 'left')
+                }<span class="connective binary">${c}</span>${
+                renderFormula(rf, path.extend(2), inPremises, 'right')
+                }</div>`,
+                (q, v, f) => wire(f, id)`<div id="${id}" data=${extraData} class="${'formula active quantifier '+extraClasses}"><!--
+                --><span class="connective quantifier">${q}</span><!--
+                --><span class="boundVariable">${v.name}${v.subscript !== -1 ? [wire()`<sub>${v.subscript}</sub>`] : []}</span><!--
+                --><span class="quantifierSeparator">.</span>${
+                    renderFormula(f, path.extend(1), inPremises, '')
+                }</div>`);
     } else {
         return f.match(
-            (p, ...ts) => wire(f, id)`<div id="${id}" class="formula"><!--
-                                         --><span class="predicate"><span class="predicateSymbol">${p}</span>${
-                                                ts.length === 0 ? '' : '('}${
-                                                ts.flatMap((t, i) => i+1 === ts.length ? [renderTerm(t)]
-                                                                                       : [renderTerm(t), wire()`, `])
-                                           }${ts.length === 0 ? '' : ')'}</span></div>`,
-            c => wire(f, id)`<div id="${id}" class="formula"><span class="connective nullary">${c}</span></div>`,
-            (c, f) => wire(f, id)`<div id="${id}" class="formula">(<!--
-                                     --><span class="connective unary">${c}</span>${
-                                        renderFormula(f, path.extend(1), inPremises)
-                                 })</div>`,
-            (lf, c, rf) => wire(f, id)`<div id="${id}" class="formula">(${
-                                            renderFormula(lf, path.extend(1), inPremises)
-                                           }<span class="connective binary">${c}</span>${
-                                            renderFormula(rf, path.extend(2), inPremises)
-                                      })</div>`,
-            (q, v, f) => wire(f, id)`<div id="${id}" class="formula quantifier">(<!--
-                                     --><span class="connective quantifier">${q}</span><!--
-                                     --><span class="boundVariable">${v.name}${v.subscript !== -1 ? [wire()`<sub>${v.subscript}</sub>`] : []}</span><!--
-                                     --><span class="quantifierSeparator">.</span>${
-                                        renderFormula(f, path.extend(1), inPremises)
-                                    })</div>`);
+                (p, ...ts) => wire(f, id)`<div id="${id}" class="${'formula '+extraClasses}"><!--
+                --><span class="predicate"><span class="predicateSymbol">${p}</span>${
+                ts.length === 0 ? '' : '('}${
+                ts.flatMap((t, i) => i+1 === ts.length ? [renderTerm(t)]
+                        : [renderTerm(t), wire()`, `])
+                }${ts.length === 0 ? '' : ')'}</span></div>`,
+                c => wire(f, id)`<div id="${id}" class="${'formula '+extraClasses}"><span class="connective nullary">${c}</span></div>`,
+                (c, f) => wire(f, id)`<div id="${id}" class="${'formula '+extraClasses}">(<!--
+                    --><span class="connective unary">${c}</span>${
+                    renderFormula(f, path.extend(1), inPremises, '')
+                    })</div>`,
+                (lf, c, rf) => wire(f, id)`<div id="${id}" class="${'formula '+extraClasses}">(${
+                    renderFormula(lf, path.extend(1), inPremises, '')
+                    }<span class="connective binary">${c}</span>${
+                    renderFormula(rf, path.extend(2), inPremises, '')
+                    })</div>`,
+                (q, v, f) => wire(f, id)`<div id="${id}" class="${'formula quantifier '+extraClasses}">(<!--
+                    --><span class="connective quantifier">${q}</span><!--
+                    --><span class="boundVariable">${v.name}${v.subscript !== -1 ? [wire()`<sub>${v.subscript}</sub>`] : []}</span><!--
+                    --><span class="quantifierSeparator">.</span>${
+                    renderFormula(f, path.extend(1), inPremises, '')
+                    })</div>`);
     }
 }
 
 function renderGoal(g: SimpleGoal, path: Path, extender: DerivationExtender): Element {
     const id = path.toString();
     return g.match((ps, cs) => {
-        const psLen = ps.length;
-        const psLenm1 = psLen - 1;
-        const csLenm1 = cs.length - 1;
-        return wire(g, id)`<div id="${id}" class="goal">${
+            const psLen = ps.length;
+            const psLenm1 = psLen - 1;
+            const csLenm1 = cs.length - 1;
+            return wire(g, id)`<div id="${id}" class="goal">${
             wire(ps, id)`<div id="${id+"premises"}" class="premises context">${
-                          ps.flatMap((p, i) => i === psLenm1 ? [renderFormula(p, path.extend(i), true, extender)]
-                                                             : [renderFormula(p, path.extend(i), true, extender), wire()`, `])
-                    }</div>`
+            ps.flatMap((p, i) => i === psLenm1 ? [renderFormula(p, path.extend(i), true, 'topLevel', extender)]
+                    : [renderFormula(p, path.extend(i), true, 'topLevel', extender), wire()`, `])
+            }</div>`
             }<span class="turnstile" title="reset" data=${{extender: extender}}>⊢</span>${ // TODO: Only show title text for active elements.
             wire(cs, id)`<div id="${id+"consequences"}" class="consequences context">${
-                            cs.flatMap((c, i) => i === csLenm1 ? [renderFormula(c, path.extend(i+psLen), false, extender)]
-                                                               : [renderFormula(c, path.extend(i+psLen), false, extender), wire()`, `])
-                       }</div>`
+            cs.flatMap((c, i) => i === csLenm1 ? [renderFormula(c, path.extend(i+psLen), false, 'topLevel', extender)]
+                    : [renderFormula(c, path.extend(i+psLen), false, 'topLevel', extender), wire()`, `])
             }</div>`
-    });
+            }</div>`
+            });
 }
 
 function renderDerivation(d: SimpleDerivation, path: Path, extender: DerivationExtender, first: boolean = true, root: boolean = false): Element {
     const id = path.toString();
     const classes = (first ? 'derivation first' : 'derivation') + (root && d.isCompleted() ? ' completed' : '');
     return d.match(
-        c => wire(d, id)`<div id="${id}" class="${classes + ' open'}">${renderGoal(c, path/*TODO:extend(0)*/, extender)}</div>`,
-        (n, ps, c) =>
+            c => wire(d, id)`<div id="${id}" class="${classes + ' open'}">${renderGoal(c, path/*TODO:extend(0)*/, extender)}</div>`,
+            (n, ps, c) =>
             wire(d, id)`<div id="${id}" class="${classes + ' closed'}"><!--
-                         --><div class="row rulePremise">${
-                                ps.map((p, i) => {
-                                  const newExtender = new InferenceExtender(
-                                                              n,
-                                                              ps.slice(0, i),
-                                                              p.conclusion,
-                                                              ps.slice(i+1),
-                                                              extender);
-                                    return renderDerivation(p, path.extend(i), newExtender, i === 0);
-                                 })
-                            }</div><!--
-                         --><div class="tag" title="${renderTagTitle(n)}">${n}</div><!--
-                         --><div class="row ruleConclusion">${
-                                renderGoal(c, path.extend(ps.length), extender)
-                            }</div></div>`);
+            --><div class="row rulePremise">${
+            ps.map((p, i) => {
+                    const newExtender = new InferenceExtender(
+                            n,
+                            ps.slice(0, i),
+                            p.conclusion,
+                            ps.slice(i+1),
+                            extender);
+                    return renderDerivation(p, path.extend(i), newExtender, i === 0);
+                    })
+            }</div><!--
+            --><div class="tag" title="${renderTagTitle(n)}">${n}</div><!--
+            --><div class="row ruleConclusion">${
+            renderGoal(c, path.extend(ps.length), extender)
+            }</div></div>`);
 }
 
 const tagNameToDescription: {[name: string]: string} = {
@@ -983,15 +1008,6 @@ function renderTagTitle(name: string): string {
 }
 
 /* Helpers **********************************************************************************************************************************************************/
-
-const BOT_SYMBOL = '⊥';
-const TOP_SYMBOL = '⊤';
-const NOT_SYMBOL = '¬';
-const AND_SYMBOL = '∧';
-const OR_SYMBOL = '∨';
-const IMP_SYMBOL = '⇒';
-const FORALL_SYMBOL = '∀';
-const EXISTS_SYMBOL = '∃';
 
 const bot: SimpleFormula = new NullaryConnective<Var, string, string, string, string, SimpleTerm>(BOT_SYMBOL);
 const top: SimpleFormula = new NullaryConnective<Var, string, string, string, string, SimpleTerm>(TOP_SYMBOL);
@@ -1042,27 +1058,27 @@ function infers(name: string, premises: Array<SimpleDerivation>, conclusion: Sim
 
 interface InputEvent {
     match<A>(
-        applyTacticCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean) => A,
-        contractCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean) => A,
-        instantiateCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean, term: SimpleTerm) => A): A;
+            applyTacticCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean, leftRight?: boolean) => A,
+            contractCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean) => A,
+            instantiateCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean, term: SimpleTerm) => A): A;
 }
 
 class ApplyTactic implements InputEvent {
-    constructor(readonly goal: SimpleGoal, readonly formula: SimpleFormula, readonly inPremises: boolean) {}
+    constructor(readonly goal: SimpleGoal, readonly formula: SimpleFormula, readonly inPremises: boolean, readonly leftRight?: boolean) {}
     match<A>(
-      applyTacticCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean) => A,
-      contractCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean) => A,
-      instantiateCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean, term: SimpleTerm) => A): A {
-        return applyTacticCase(this.goal, this.formula, this.inPremises);
+            applyTacticCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean, leftRight?: boolean) => A,
+            contractCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean) => A,
+            instantiateCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean, term: SimpleTerm) => A): A {
+        return applyTacticCase(this.goal, this.formula, this.inPremises, this.leftRight);
     }
 }
 
 class Contract implements InputEvent {
     constructor(readonly goal: SimpleGoal, readonly formula: SimpleFormula, readonly inPremises: boolean) {}
     match<A>(
-      applyTacticCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean) => A,
-      contractCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean) => A,
-      instantiateCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean, term: SimpleTerm) => A): A {
+            applyTacticCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean, leftRight?: boolean) => A,
+            contractCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean) => A,
+            instantiateCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean, term: SimpleTerm) => A): A {
         return contractCase(this.goal, this.formula, this.inPremises);
     }
 }
@@ -1070,26 +1086,26 @@ class Contract implements InputEvent {
 class Instantiate implements InputEvent {
     constructor(readonly goal: SimpleGoal, readonly formula: SimpleFormula, readonly inPremises: boolean, readonly term: SimpleTerm) {}
     match<A>(
-      applyTacticCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean) => A,
-      contractCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean) => A,
-      instantiateCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean, term: SimpleTerm) => A): A {
+            applyTacticCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean, leftRight?: boolean) => A,
+            contractCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean) => A,
+            instantiateCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean, term: SimpleTerm) => A): A {
         return instantiateCase(this.goal, this.formula, this.inPremises, this.term);
     }
 }
 
 interface OutputEvent {
     match<A>(
-        failedCase: (message: string) => A,
-        newGoalsCase: (name: string, goals: Array<SimpleGoal>) => A,
-        contractOrInstantiateCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean) => A): A;
+            failedCase: (message: string) => A,
+            newGoalsCase: (name: string, goals: Array<SimpleGoal>) => A,
+            contractOrInstantiateCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean) => A): A;
 }
 
 class Failed implements OutputEvent {
     constructor(readonly message: string) {}
     match<A>(
-      failedCase: (message: string) => A,
-      newGoalsCase: (name: string, goals: Array<SimpleGoal>) => A,
-      contractOrInstantiateCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean) => A): A {
+            failedCase: (message: string) => A,
+            newGoalsCase: (name: string, goals: Array<SimpleGoal>) => A,
+            contractOrInstantiateCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean) => A): A {
         return failedCase(this.message);
     }
 }
@@ -1097,9 +1113,9 @@ class Failed implements OutputEvent {
 class NewGoals implements OutputEvent {
     constructor(readonly name: string, readonly goals: Array<SimpleGoal>) {}
     match<A>(
-      failedCase: (message: string) => A,
-      newGoalsCase: (name: string, goals: Array<SimpleGoal>) => A,
-      contractOrInstantiateCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean) => A): A {
+            failedCase: (message: string) => A,
+            newGoalsCase: (name: string, goals: Array<SimpleGoal>) => A,
+            contractOrInstantiateCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean) => A): A {
         return newGoalsCase(this.name, this.goals);
     }
 }
@@ -1107,14 +1123,14 @@ class NewGoals implements OutputEvent {
 class ContractOrInstantiate implements OutputEvent {
     constructor(readonly goal: SimpleGoal, readonly formula: SimpleFormula, readonly inPremises: boolean) {}
     match<A>(
-      failedCase: (message: string) => A,
-      newGoalsCase: (name: string, goals: Array<SimpleGoal>) => A,
-      contractOrInstantiateCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean) => A): A {
+            failedCase: (message: string) => A,
+            newGoalsCase: (name: string, goals: Array<SimpleGoal>) => A,
+            contractOrInstantiateCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean) => A): A {
         return contractOrInstantiateCase(this.goal, this.formula, this.inPremises);
     }
 }
 
-/* Logic ************************************************************************************************************************************************************/
+/* Intuitionisticc Logic *********************************************************************************************************************************************/
 
 type Logic = (input: InputEvent) => OutputEvent;
 
@@ -1123,6 +1139,138 @@ type Logic = (input: InputEvent) => OutputEvent;
 // Supporting this will require some changes to the user interface.
 // Handling natural deduction is awkward because the elimination rules have the connective in the premises. The user interface would
 // be something like clicking on a formula, and then choosing a connective that was eliminated to produce that formula.
+
+// Test case:  ¬(A ∨ ¬A) ⇒ ⊥  
+const ljCalculus: Logic = (input) => input.match(
+        (goal, formula, inPremises, leftRight) => formula.match<OutputEvent>( // TODO: Refactor and finish.
+            (predicate, ...terms) => {
+            if(inPremises) {
+            if(goal.consequences[0].matches(predicate, terms)) {
+            return new NewGoals('Ax', []);
+            } else {
+            return new Failed('Formula does not match conclusion.');
+            }
+            } else {
+            if(goal.premises.some(c => c.matches(predicate, terms))) {
+            return new NewGoals('Ax', []);
+            } else {
+            return new Failed('Formula not found in premises.');
+            }
+            }
+            },
+            connective => {
+            switch(connective) {
+            case TOP_SYMBOL:
+            if(inPremises) {
+            return new NewGoals('⊤L', [new Goal(goal.premises.filter(f => f !== formula), goal.consequences)]);
+            } else {
+                return new NewGoals('⊤R', []);
+            }
+            case BOT_SYMBOL:
+            if(inPremises) {
+                return new NewGoals('⊥L', []);
+            } else {
+                // TODO: Make ⊥ not clickable in conclusion.
+                // Behave as if we clicked on ⊥ in the premises, if there is a ⊥.  
+                if(goal.premises.some(p => p instanceof NullaryConnective && p.connective === BOT_SYMBOL)) {
+                    return new NewGoals('⊥L', []);
+                } else {
+                    return new Failed('Didn\'t find ⊥ in premises. TODO: Need to make this option inaccessible.');
+                }
+            }
+            default:
+            throw 'Not implemented.';
+            }
+            },
+            (connective, f2) => {
+                switch(connective) {
+                    case NOT_SYMBOL:
+                        if(inPremises) {
+                            // TODO: This performs the contraction that LJT eliminates, i.e. duplicating formula in the first goal.
+                            return new NewGoals('⇒L', [new Goal(goal.premises, [f2])]);
+                        } else {
+                            return new NewGoals('¬R', [new Goal(goal.premises.concat(f2), [new NullaryConnective(BOT_SYMBOL)])]);
+                        }
+                    default:
+                        throw 'Not implemented.';
+                }
+            },
+            (lf, connective, rf) => {
+                switch(connective) {
+                    case AND_SYMBOL:
+                        if(inPremises) {
+                            // NOTE: This is treating ∧ like ∧^+ (i.e. with a positive polarity).
+                            return new NewGoals('∧L', [new Goal(goal.premises.filter(f => f !== formula).concat(lf,rf), goal.consequences)]);
+                        } else {
+                            return new NewGoals('∧R', [new Goal(goal.premises, [lf]), new Goal(goal.premises, [rf])]);
+                        }
+                    case OR_SYMBOL:
+                        if(inPremises) {
+                            const ps = goal.premises.filter(f => f !== formula);
+                            return new NewGoals('∨L', [new Goal(ps.concat(lf), goal.consequences),
+                                    new Goal(ps.concat(rf), goal.consequences)]);
+                        } else {
+                            if(leftRight === void(0)) return new Failed('Select left or right subformula.');
+                            return new NewGoals('∨R', [new Goal(goal.premises, [leftRight ? lf : rf])]);
+                        }
+                    case IMP_SYMBOL:
+                        if(inPremises) {
+                            // TODO: This performs the contraction that LJT eliminates, i.e. duplicating formula in the first goal.
+                            const ps = goal.premises.filter(f => f !== formula);
+                            return new NewGoals('⇒L', [new Goal(goal.premises, [lf]),
+                                    new Goal(ps.concat(rf), goal.consequences)]);
+                        } else {
+                            return new NewGoals('⇒R', [new Goal(goal.premises.concat(lf), [rf])]);
+                        }
+                    default:
+                        throw 'Not implemented.';
+                }
+            },
+            (quantifier, v, f2) => {
+                switch(quantifier) {
+                    case FORALL_SYMBOL:
+                    if(inPremises) {
+                        return new ContractOrInstantiate(goal, formula, inPremises);
+                    } else {
+                        const variableContext = goal.freeVariables();
+                        const f3 = variableContext.has(v) ? f2.alphaRename(v, v.freshen(variableContext)) : f2;
+                        return new NewGoals('∀R', [new Goal(goal.premises, [f3])]);
+                    }
+                case EXISTS_SYMBOL:
+                    if(inPremises) {
+                        const variableContext = goal.freeVariables();
+                        const f3 = variableContext.has(v) ? f2.alphaRename(v, v.freshen(variableContext)) : f2;
+                        return new NewGoals('∃L', [new Goal(goal.premises.filter(f => f !== formula).concat(f3), goal.consequences)]);
+                    } else {
+                        // TODO: Need to indicate not to show contract button.
+                        return new ContractOrInstantiate(goal, formula, inPremises);
+                    }
+                default:
+                    throw 'Not implemented.';
+            }
+        }),
+    (goal, formula, inPremises) => {
+        // TODO: Don't allow contraction for conclusion.
+        if(!inPremises) new Failed('Can\'t contract right. TODO: Need to make this option inaccessible.');
+        return new NewGoals('CL', [new Goal(goal.premises.concat(formula), goal.consequences)]);
+    },
+    (goal, formula, inPremises, term) => {
+        if(!(formula instanceof Quantifier)) throw 'Quantified formula expected.';
+        // NOTE: Can't be as gung-ho about filtering out the original formulas from the contexts due to contraction.
+
+        if(inPremises) { // then forall case
+            let first = 0; // HACK: Horrible hack
+            const f2 = formula.formula.substitute(formula.variable, term);
+            return new NewGoals('∀L', [new Goal(goal.premises.filter(f => f !== formula || first++ !== 0).concat(f2),
+                                                goal.consequences)]);
+        } else { // exists case
+            const f2 = formula.formula.substitute(formula.variable, term);
+            return new NewGoals('∃R', [new Goal(goal.premises, [f2])]);
+        }
+    });
+
+/* Classical Logic **************************************************************************************************************************************************/
+
 const classicalSequentCalculus: Logic = (input) => input.match(
     (goal, formula, inPremises) => formula.match<OutputEvent>( // TODO: Refactor and finish.
         (predicate, ...terms) => {
@@ -1271,6 +1419,8 @@ if(termBtn === null) throw 'Term button missing.';
 if(contractBtn === null) throw 'Contract button missing.';
 if(container === null) throw 'Container missing.';
 
+const logic = classicalSequentCalculus;
+
 const derivationFromHash = () => {
     try {
         // Compress and decompress? http://lzma-js.github.io/LZMA-JS/ or http://pieroxy.net/blog/pages/lz-string/index.html
@@ -1294,23 +1444,27 @@ const refresh = (changeHash: boolean = true) => {
     bind(container)`${renderDerivation(example, new StartPath('root.'), new GoalExtender(example.conclusion), true, true)}`;
 };
 
+const SHOWN_CLASS = 'shown';
+
 const onClick = (event: MouseEvent) => {
     const target: any = event.target;
     let extraData = target.data as {extender: DerivationExtender, formula?: SimpleFormula, inPremises?: boolean};
     if(target.data === void(0)) {
-        const closest = target.closest('.topLevel');
+        const closest = target.closest('.active');
         if(closest === null) return;
-        extraData = closest.data;
+        extraData = closest.data; // TODO: Include some information about the clicked element.
     }
 
     if(extraData.formula === void(0)) {
         example = extraData.extender.open();
     } else {
-        const output = classicalSequentCalculus(new ApplyTactic(extraData.extender.goal, extraData.formula, extraData.inPremises!!));
+        //const output = classicalSequentCalculus(new ApplyTactic(extraData.extender.goal, extraData.formula, extraData.inPremises!!));
+        const leftRight = target.closest('.left') ? true : target.closest('.right') ? false : void(0);
+        const output = logic(new ApplyTactic(extraData.extender.goal, extraData.formula, extraData.inPremises!!, leftRight));
         example = output.match(
             (message) => {
                 toast.textContent = message;
-                toast.className = 'shown';
+                toast.classList.add(SHOWN_CLASS);
                 return example;
             },
             (name, goals) => extraData.extender.extend(name, goals.map(g => new OpenDerivation(g))),
@@ -1318,7 +1472,7 @@ const onClick = (event: MouseEvent) => {
                 (popup as any).data = extraData;
                 popup.style.left = (event.pageX-45) + 'px';
                 popup.style.top = (event.pageY-40) + 'px';
-                popup.className = 'shown';
+                popup.classList.add(SHOWN_CLASS);
                 termInput.focus();
                 return example;
             });
@@ -1330,22 +1484,24 @@ const onTermInput = (event: Event) => {
     const extraData = (popup as any).data as {extender: DerivationExtender, formula: SimpleFormula, inPremises: boolean};
     let output: OutputEvent;
     if(event.target === contractBtn) {
-        output = classicalSequentCalculus(new Contract(extraData.extender.goal, extraData.formula, extraData.inPremises));
+        //output = classicalSequentCalculus(new Contract(extraData.extender.goal, extraData.formula, extraData.inPremises));
+        output = logic(new Contract(extraData.extender.goal, extraData.formula, extraData.inPremises));
     } else { // termBtn was clicked or termInput changed, either way do the same thing
         const termString: string = (termInput as any).value;
         const term = termFromString(termString);
         if(term === null) {
             output = new Failed(`Failed to parse term: ${termString}`);
         } else {
-            output = classicalSequentCalculus(new Instantiate(extraData.extender.goal, extraData.formula, extraData.inPremises, term));
+            //output = classicalSequentCalculus(new Instantiate(extraData.extender.goal, extraData.formula, extraData.inPremises, term));
+            output = logic(new Instantiate(extraData.extender.goal, extraData.formula, extraData.inPremises, term));
         }
     }
     (termInput as any).value = '';
-    popup.className = '';
+    popup.classList.remove(SHOWN_CLASS);
     example = output.match(
         (message) => {
             toast.textContent = message;
-            toast.className = 'shown';
+            toast.classList.add(SHOWN_CLASS);
             return example;
         },
         (name, goals) => extraData.extender.extend(name, goals.map(g => new OpenDerivation(g))),
@@ -1360,15 +1516,15 @@ const onGoalInput = (event: Event) => {
     const goal = goalFromString(goalText);
     if(goal === null) {
         toast.textContent = 'Failed to parse goal.';
-        toast.className = 'shown';
+        toast.classList.add(SHOWN_CLASS);
     } else {
         example = new OpenDerivation(goal);
         refresh();
     }
 };
 
-const onAnimationEnd = (event: Event) => toast.className = '';
-const onMouseLeave = (event: Event) => { (popup as any).data = void(0); popup.className = ''; };
+const onAnimationEnd = (event: Event) => toast.classList.remove(SHOWN_CLASS);
+const onMouseLeave = (event: Event) => { (popup as any).data = void(0); popup.classList.remove(SHOWN_CLASS); };
 const onHashChange = (event: Event) => { derivationFromHash(); refresh(false); };
 
 const scheduler = newDefaultScheduler();

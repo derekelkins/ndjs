@@ -14,7 +14,7 @@
         For now, a purely client-side reimplementation of <a href="http://logitext.mit.edu/main">Logitext</a>.<br/><br/>
         Enter goal or formula: <input type="text" id="goalInput" value="((A -> B) -> A) -> A"/>
 </div>
-<div id="container" class="lk"></div>
+<div id="container" class="lj"></div>
 <div id="toast"></div>
 <div id="popup">
     <div id="popupBody">
@@ -28,7 +28,7 @@
     As you work the URL changes and you can give someone else your current URL to give them a link to
     the derivation exactly as you currently have it.<br/><br/>
 
-    The system implements <a href="https://en.wikipedia.org/wiki/Sequent_calculus#Inference_rules">LK</a>. It lacks Cut, 
+    The system implement <a href="https://en.wikipedia.org/wiki/Sequent_calculus#Inference_rules">LJ</a>. It lacks Cut, 
     so you can only make cut-free proofs (but <a href="https://en.wikipedia.org/wiki/Cut-elimination_theorem">Gentzen's Hauptsatz</a> says
     that's all you need [modulo an exponential difference in size...]). Contraction is also limited to certain cases with
     quantifiers. There should never be any benefit (or at least need) to perform contraction otherwise.

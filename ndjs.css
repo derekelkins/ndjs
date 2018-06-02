@@ -4,7 +4,7 @@ body {
 
 a {
     color: inherit;
-    text-decoration-style: dashed;
+    text-decoration-style: dotted;
 }
 
 a:hover {
@@ -153,18 +153,30 @@ a:hover {
     cursor: pointer;
 }
 
-.derivation .formula.topLevel:hover {
+.derivation .formula.active:hover {
     background-color: skyblue;
     cursor: pointer;
 }
 
-.derivation .formula.topLevel:hover > .connective {
+.derivation .formula.active:hover > .connective {
     color: white;
     background-color: black;
     cursor: pointer;
 }
 
-.derivation .formula.topLevel > .connective:hover {
+.lj .derivation .consequences .formula.active:hover > .connective.binary {
+    color: inherit;
+    background-color: inherit;
+    cursor: inherit;
+}
+
+.lj .derivation .consequences .formula.active .left:hover, .lj .derivation .consequences .formula.active .right:hover {
+    color: white;
+    background-color: black;
+    cursor: pointer;
+}
+
+.derivation .formula.active > .connective:hover {
     cursor: pointer;
 }
 
