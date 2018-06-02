@@ -1140,47 +1140,47 @@ type Logic = (input: InputEvent) => OutputEvent;
 // Handling natural deduction is awkward because the elimination rules have the connective in the premises. The user interface would
 // be something like clicking on a formula, and then choosing a connective that was eliminated to produce that formula.
 
-// Test case:  ¬(A ∨ ¬A) ⇒ ⊥  
+// Test case:  ¬(A ∨ ¬A) ⇒ ⊥
 const ljCalculus: Logic = (input) => input.match(
         (goal, formula, inPremises, leftRight) => formula.match<OutputEvent>( // TODO: Refactor and finish.
             (predicate, ...terms) => {
-            if(inPremises) {
-            if(goal.consequences[0].matches(predicate, terms)) {
-            return new NewGoals('Ax', []);
-            } else {
-            return new Failed('Formula does not match conclusion.');
-            }
-            } else {
-            if(goal.premises.some(c => c.matches(predicate, terms))) {
-            return new NewGoals('Ax', []);
-            } else {
-            return new Failed('Formula not found in premises.');
-            }
-            }
+                if(inPremises) {
+                    if(goal.consequences[0].matches(predicate, terms)) {
+                        return new NewGoals('Ax', []);
+                    } else {
+                        return new Failed('Formula does not match conclusion.');
+                    }
+                } else {
+                    if(goal.premises.some(c => c.matches(predicate, terms))) {
+                        return new NewGoals('Ax', []);
+                    } else {
+                        return new Failed('Formula not found in premises.');
+                    }
+                }
             },
             connective => {
-            switch(connective) {
-            case TOP_SYMBOL:
-            if(inPremises) {
-            return new NewGoals('⊤L', [new Goal(goal.premises.filter(f => f !== formula), goal.consequences)]);
-            } else {
-                return new NewGoals('⊤R', []);
-            }
-            case BOT_SYMBOL:
-            if(inPremises) {
-                return new NewGoals('⊥L', []);
-            } else {
-                // TODO: Make ⊥ not clickable in conclusion.
-                // Behave as if we clicked on ⊥ in the premises, if there is a ⊥.  
-                if(goal.premises.some(p => p instanceof NullaryConnective && p.connective === BOT_SYMBOL)) {
-                    return new NewGoals('⊥L', []);
-                } else {
-                    return new Failed('Didn\'t find ⊥ in premises. TODO: Need to make this option inaccessible.');
-                }
-            }
-            default:
-            throw 'Not implemented.';
-            }
+                switch(connective) {
+                    case TOP_SYMBOL:
+                        if(inPremises) {
+                            return new NewGoals('⊤L', [new Goal(goal.premises.filter(f => f !== formula), goal.consequences)]);
+                        } else {
+                            return new NewGoals('⊤R', []);
+                        }
+                    case BOT_SYMBOL:
+                        if(inPremises) {
+                            return new NewGoals('⊥L', []);
+                        } else {
+                            // TODO: Make ⊥ not clickable in conclusion.
+                            // Behave as if we clicked on ⊥ in the premises, if there is a ⊥.
+                            if(goal.premises.some(p => p instanceof NullaryConnective && p.connective === BOT_SYMBOL)) {
+                                return new NewGoals('⊥L', []);
+                            } else {
+                                return new Failed('Didn\'t find ⊥ in premises. TODO: Need to make this option inaccessible.');
+                            }
+                        }
+                    default:
+                        throw 'Not implemented.';
+                    }
             },
             (connective, f2) => {
                 switch(connective) {
