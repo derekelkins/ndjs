@@ -1247,7 +1247,7 @@ const ljCalculus: Logic = (input) => input.match(
                         if(goal.premises.some(p => p instanceof NullaryConnective && p.connective === BOT_SYMBOL)) {
                             return new NewGoals('⊥L', []);
                         } else {
-                            return new Failed('Didn\'t find ⊥ in premises. TODO: Need to make this option inaccessible.');
+                            return new Failed('Didn\'t find ⊥ in premises.'); // TODO: Need to make this option inaccessible.');
                         }
                     }
                 default:
@@ -1272,15 +1272,14 @@ const ljCalculus: Logic = (input) => input.match(
                 case AND_SYMBOL:
                     if(inPremises) {
                         // NOTE: This is treating ∧ like ∧^+ (i.e. with a positive polarity).
-                        return new NewGoals('∧L', [new Goal(goal.premises.filter(f => f !== formula).concat(lf,rf), goal.consequences)]);
+                        return new NewGoals('∧L', [new Goal(goal.premises.flatMap(f => f === formula ? [lf,rf] : [f]), goal.consequences)]);
                     } else {
                         return new NewGoals('∧R', [new Goal(goal.premises, [lf]), new Goal(goal.premises, [rf])]);
                     }
                 case OR_SYMBOL:
                     if(inPremises) {
-                        const ps = goal.premises.filter(f => f !== formula);
-                        return new NewGoals('∨L', [new Goal(ps.concat(lf), goal.consequences),
-                                new Goal(ps.concat(rf), goal.consequences)]);
+                        return new NewGoals('∨L', [new Goal(goal.premises.map(f => f === formula ? lf : f), goal.consequences),
+                                                   new Goal(goal.premises.map(f => f === formula ? lf : f), goal.consequences)]);
                     } else {
                         if(leftRight === void(0)) return new Failed('Select left or right subformula.');
                         return new NewGoals(`∨R_${leftRight ? '1' : '2'}`, [new Goal(goal.premises, [leftRight ? lf : rf])]);
@@ -1288,9 +1287,8 @@ const ljCalculus: Logic = (input) => input.match(
                 case IMP_SYMBOL:
                     if(inPremises) {
                         // TODO: This performs the contraction that LJT eliminates, i.e. duplicating formula in the first goal.
-                        const ps = goal.premises.filter(f => f !== formula);
                         return new NewGoals('⇒L', [new Goal(goal.premises, [lf]),
-                                new Goal(ps.concat(rf), goal.consequences)]);
+                                                   new Goal(goal.premises.map(f => f === formula ? rf : f), goal.consequences)]);
                     } else {
                         return new NewGoals('⇒R', [new Goal(goal.premises.concat(lf), [rf])]);
                     }
@@ -1312,7 +1310,7 @@ const ljCalculus: Logic = (input) => input.match(
                     if(inPremises) {
                         const variableContext = goal.freeVariables();
                         const f3 = variableContext.has(v) ? f2.alphaRename(v, v.freshen(variableContext)) : f2;
-                        return new NewGoals('∃L', [new Goal(goal.premises.filter(f => f !== formula).concat(f3), goal.consequences)]);
+                        return new NewGoals('∃L', [new Goal(goal.premises.map(f => f === formula ? f3 : f), goal.consequences)]);
                     } else {
                         return new ContractOrInstantiate(goal, formula, inPremises);
                     }
@@ -1331,7 +1329,7 @@ const ljCalculus: Logic = (input) => input.match(
         if(inPremises) { // then forall case
             let first = 0; // HACK: Horrible hack
             const f2 = formula.formula.substitute(formula.variable, term);
-            return new NewGoals('∀L', [new Goal(goal.premises.filter(f => f !== formula || first++ !== 0).concat(f2),
+            return new NewGoals('∀L', [new Goal(goal.premises.map(f => f === formula && first++ === 0 ? f2 : f),
                                                 goal.consequences)]);
         } else { // exists case
             const f2 = formula.formula.substitute(formula.variable, term);
@@ -1392,27 +1390,24 @@ const classicalSequentCalculus: Logic = (input) => input.match(
             switch(connective) {
                 case AND_SYMBOL:
                     if(inPremises) {
-                        return new NewGoals('∧L', [new Goal(goal.premises.filter(f => f !== formula).concat(lf,rf), goal.consequences)]);
+                        return new NewGoals('∧L', [new Goal(goal.premises.flatMap(f => f === formula ? [lf,rf] : [f]), goal.consequences)]);
                     } else {
-                        const cs = goal.consequences.filter(f => f !== formula);
-                        return new NewGoals('∧R', [new Goal(goal.premises, cs.concat(lf)),
-                                                   new Goal(goal.premises, cs.concat(rf))]);
+                        return new NewGoals('∧R', [new Goal(goal.premises, goal.consequences.map(f => f === formula ? lf : f)),
+                                                   new Goal(goal.premises, goal.consequences.map(f => f === formula ? rf : f))]);
                     }
                 case OR_SYMBOL:
                     if(inPremises) {
-                        const ps = goal.premises.filter(f => f !== formula);
-                        return new NewGoals('∨L', [new Goal(ps.concat(lf), goal.consequences),
-                                                   new Goal(ps.concat(rf), goal.consequences)]);
+                        return new NewGoals('∨L', [new Goal(goal.premises.map(f => f === formula ? lf : f), goal.consequences),
+                                                   new Goal(goal.premises.map(f => f === formula ? rf : f), goal.consequences)]);
                     } else {
-                        return new NewGoals('∨R', [new Goal(goal.premises, goal.consequences.filter(f => f !== formula).concat(lf,rf))]);
+                        return new NewGoals('∨R', [new Goal(goal.premises, goal.consequences.flatMap(f => f === formula ? [lf,rf] : [f]))]);
                     }
                 case IMP_SYMBOL:
                     if(inPremises) {
-                        const ps = goal.premises.filter(f => f !== formula);
-                        return new NewGoals('⇒L', [new Goal(ps, goal.consequences.concat(lf)),
-                                                   new Goal(ps.concat(rf), goal.consequences)]);
+                        return new NewGoals('⇒L', [new Goal(goal.premises.filter(f => f !== formula), goal.consequences.concat(lf)),
+                                                   new Goal(goal.premises.map(f => f === formula ? rf : f), goal.consequences)]);
                     } else {
-                        return new NewGoals('⇒R', [new Goal(goal.premises.concat(lf), goal.consequences.filter(f => f !== formula).concat(rf))]);
+                        return new NewGoals('⇒R', [new Goal(goal.premises.concat(lf), goal.consequences.map(f => f === formula ? rf : f))]);
                     }
                 default:
                     throw 'Not implemented.';
@@ -1426,13 +1421,13 @@ const classicalSequentCalculus: Logic = (input) => input.match(
                     } else {
                         const variableContext = goal.freeVariables();
                         const f3 = variableContext.has(v) ? f2.alphaRename(v, v.freshen(variableContext)) : f2;
-                        return new NewGoals('∀R', [new Goal(goal.premises, goal.consequences.filter(f => f !== formula).concat(f3))]);
+                        return new NewGoals('∀R', [new Goal(goal.premises, goal.consequences.map(f => f === formula ? f3 : f))]);
                     }
                 case EXISTS_SYMBOL:
                     if(inPremises) {
                         const variableContext = goal.freeVariables();
                         const f3 = variableContext.has(v) ? f2.alphaRename(v, v.freshen(variableContext)) : f2;
-                        return new NewGoals('∃L', [new Goal(goal.premises.filter(f => f !== formula).concat(f3), goal.consequences)]);
+                        return new NewGoals('∃L', [new Goal(goal.premises.map(f => f === formula ? f3 : f), goal.consequences)]);
                     } else {
                         return new ContractOrInstantiate(goal, formula, inPremises);
                     }
@@ -1454,13 +1449,13 @@ const classicalSequentCalculus: Logic = (input) => input.match(
         if(inPremises) { // then forall case
             let first = 0; // HACK: Horrible hack
             const f2 = formula.formula.substitute(formula.variable, term);
-            return new NewGoals('∀L', [new Goal(goal.premises.filter(f => f !== formula || first++ !== 0).concat(f2),
+            return new NewGoals('∀L', [new Goal(goal.premises.map(f => f === formula && first++ === 0 ? f2 : f),
                                                 goal.consequences)]);
         } else { // exists case
             let first = 0; // HACK: Horrible hack
             const f2 = formula.formula.substitute(formula.variable, term);
             return new NewGoals('∃R', [new Goal(goal.premises,
-                                                goal.consequences.filter(f => f !== formula || first++ !== 0).concat(f2))]);
+                                                goal.consequences.map(f => f === formula && first++ === 0 ? f2 : f))]);
         }
     });
 
