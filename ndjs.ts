@@ -1282,7 +1282,8 @@ const ljCalculus: Logic = (input) => input.match(
                                                    new Goal(goal.premises.map(f => f === formula ? lf : f), goal.consequences)]);
                     } else {
                         if(leftRight === void(0)) return new Failed('Select left or right subformula.');
-                        return new NewGoals(`∨R_${leftRight ? '1' : '2'}`, [new Goal(goal.premises, [leftRight ? lf : rf])]);
+                        return new NewGoals('∨R', [new Goal(goal.premises, [leftRight ? lf : rf])]);
+                        // TODO: return new NewGoals(`∨R_${leftRight ? '1' : '2'}`, [new Goal(goal.premises, [leftRight ? lf : rf])]);
                     }
                 case IMP_SYMBOL:
                     if(inPremises) {
@@ -1514,8 +1515,8 @@ export function main(containerId: string, options : {logic: 'lk' | 'lj', toLaTeX
         if(changeHash) location.hash = '#'+compressToEncodedURIComponent(JSON.stringify(cse(example.toJson())));
         bind(container)`${[
             wire(dummy, 'goalBox')`<div id="goalBox" class="${options.showInput ? '' : 'hidden'}">Enter goal or formula: ${goalInput}</div>`,
-            toast,
             wire(dummy, 'wrapper')`<div id="derivationWrapper">${renderDerivation(example, new StartPath('root.'), new GoalExtender(example.conclusion), true, true)}</div>`,
+            toast,
             popup,
             latexContainer
         ]}`;
