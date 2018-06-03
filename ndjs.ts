@@ -35,6 +35,10 @@ interface Display {
     toDisplayString(topLevel: boolean): string;
 }
 
+interface LaTeX {
+    toLaTeX(topLevel: boolean): string;
+}
+
 interface FreeVariables<V, T> {
     freeVariables(): Set<V>;
 }
@@ -46,10 +50,30 @@ interface Substitute<V, T> extends FreeVariables<V, T> {
 }
 
 // Just for convenience
-interface IVariable<V> extends Equals<V>, ToJson, Freshen<V>, Display {}
-interface IGeneric<V extends IVariable<V>, O> extends ToJson, Substitute<V, GenericTerm<V, O>>, Display {}
+interface IVariable<V> extends Equals<V>, ToJson, Freshen<V>, Display, LaTeX {}
+interface IGeneric<V extends IVariable<V>, O> extends ToJson, Substitute<V, GenericTerm<V, O>>, Display, LaTeX  {}
 
 /* Terms ************************************************************************************************************************************************************/
+
+const BOT_SYMBOL = '⊥';
+const TOP_SYMBOL = '⊤';
+const NOT_SYMBOL = '¬';
+const AND_SYMBOL = '∧';
+const OR_SYMBOL = '∨';
+const IMP_SYMBOL = '⇒';
+const FORALL_SYMBOL = '∀';
+const EXISTS_SYMBOL = '∃';
+
+const connectiveToLaTeX: {[conn: string]: string} = {
+    [BOT_SYMBOL]: '\\bot{}',
+    [TOP_SYMBOL]: '\\top{}',
+    [NOT_SYMBOL]: '\\neg{}',
+    [AND_SYMBOL]: '\\land{}',
+    [OR_SYMBOL]: '\\lor{}',
+    [IMP_SYMBOL]: '\\Rightarrow{}',
+    [FORALL_SYMBOL]: '\\forall{}',
+    [EXISTS_SYMBOL]: '\\exists{}'
+};
 
 interface GenericTerm<V extends IVariable<V>, O> extends IGeneric<V, O>, Equals<GenericTerm<V, O>> {
     match<A>(variableCase: (v: V) => A,
@@ -59,6 +83,7 @@ interface GenericTerm<V extends IVariable<V>, O> extends IGeneric<V, O>, Equals<
 
 class Variable<V extends IVariable<V>, O> implements GenericTerm<V, O> {
     constructor(readonly variable: V) {}
+
     match<A>(variableCase: (v: V) => A, opCase: (o: O, ...ts: Array<GenericTerm<V, O>>) => A): A {
         return variableCase(this.variable);
     }
@@ -68,6 +93,8 @@ class Variable<V extends IVariable<V>, O> implements GenericTerm<V, O> {
     }
 
     toDisplayString(topLevel: boolean): string { return this.variable.toDisplayString(true); }
+
+    toLaTeX(topLevel: boolean): string { return this.variable.toLaTeX(true); }
 
     freeVariables(): Set<V> {
         return Set.of(this.variable);
@@ -92,7 +119,9 @@ class Variable<V extends IVariable<V>, O> implements GenericTerm<V, O> {
 
 class Operator<V extends IVariable<V>, O> implements GenericTerm<V, O> {
     readonly terms: Array<GenericTerm<V, O>>;
+
     constructor(readonly operator: O, ...ts: Array<GenericTerm<V, O>>) { this.terms = ts; }
+
     match<A>(variableCase: (v: V) => A, opCase: (o: O, ...ts: Array<GenericTerm<V, O>>) => A): A {
         return opCase(this.operator, ...this.terms);
     }
@@ -102,6 +131,8 @@ class Operator<V extends IVariable<V>, O> implements GenericTerm<V, O> {
     }
 
     toDisplayString(topLevel: boolean): string { return this.operator+'('+this.terms.map(t => t.toDisplayString(true)).join(', ')+')'; }
+
+    toLaTeX(topLevel: boolean): string { return '\\mathsf{'+this.operator+'}('+this.terms.map(t => t.toLaTeX(true)).join(', ')+')'; }
 
     freeVariables(): Set<V> {
         return Set.union(this.terms.map(t => t.freeVariables()));
@@ -157,12 +188,15 @@ interface GenericFormula<V extends IVariable<V>, P, C, Q, O, T extends GenericTe
              unaryCase: (connective: C, formula: GenericFormula<V, P, C, Q, O, T>) => A,
              binaryCase: (leftFormula: GenericFormula<V, P, C, Q, O, T>, connective: C, rightFormula: GenericFormula<V, P, C, Q, O, T>) => A,
              quantifierCase: (quantifier: Q, v: V, formula: GenericFormula<V, P, C, Q, O, T>) => A): A;
+
     matches(predicate: P, terms: Array<T>): boolean;
 }
 
 class Predicate<V extends IVariable<V>, P, C, Q, O, T extends GenericTerm<V, O>> implements GenericFormula<V, P, C, Q, O, T> {
     readonly terms: Array<T>;
+
     constructor(readonly predicate: P, ...ts: Array<T>) { this.terms = ts; }
+
     match<A>(predicateCase: (predicate: P, ...terms: Array<T>) => A,
              nullaryCase: (connective: C) => A,
              unaryCase: (connective: C, formula: GenericFormula<V, P, C, Q, O, T>) => A,
@@ -177,6 +211,10 @@ class Predicate<V extends IVariable<V>, P, C, Q, O, T extends GenericTerm<V, O>>
 
     toDisplayString(topLevel: boolean): string {
         return this.terms.length === 0 ? ''+this.predicate : this.predicate+'('+this.terms.map(t => t.toDisplayString(true)).join(', ')+')';
+    }
+
+    toLaTeX(topLevel: boolean): string {
+        return this.terms.length === 0 ? '\\mathrm{'+this.predicate+'}' : '\\mathrm{'+this.predicate+'}('+this.terms.map(t => t.toLaTeX(true)).join(', ')+')';
     }
 
     freeVariables(): Set<V> {
@@ -202,6 +240,7 @@ class Predicate<V extends IVariable<V>, P, C, Q, O, T extends GenericTerm<V, O>>
 
 class NullaryConnective<V extends IVariable<V>, P, C, Q, O, T extends GenericTerm<V, O>> implements GenericFormula<V, P, C, Q, O, T> {
     constructor(readonly connective: C) { }
+
     match<A>(predicateCase: (predicate: P, ...terms: Array<T>) => A,
              nullaryCase: (connective: C) => A,
              unaryCase: (connective: C, formula: GenericFormula<V, P, C, Q, O, T>) => A,
@@ -215,6 +254,8 @@ class NullaryConnective<V extends IVariable<V>, P, C, Q, O, T extends GenericTer
     }
 
     toDisplayString(topLevel: boolean): string { return ''+this.connective; }
+
+    toLaTeX(topLevel: boolean): string { return connectiveToLaTeX[''+this.connective]; }
 
     freeVariables(): Set<V> {
         return Set();
@@ -231,6 +272,7 @@ class NullaryConnective<V extends IVariable<V>, P, C, Q, O, T extends GenericTer
 
 class UnaryConnective<V extends IVariable<V>, P, C, Q, O, T extends GenericTerm<V, O>> implements GenericFormula<V, P, C, Q, O, T> {
     constructor(readonly connective: C, readonly formula: GenericFormula<V, P, C, Q , O, T>) { }
+
     match<A>(predicateCase: (predicate: P, ...terms: Array<T>) => A,
              nullaryCase: (connective: C) => A,
              unaryCase: (connective: C, formula: GenericFormula<V, P, C, Q, O, T>) => A,
@@ -248,6 +290,14 @@ class UnaryConnective<V extends IVariable<V>, P, C, Q, O, T extends GenericTerm<
             return this.connective + this.formula.toDisplayString(false);
         } else {
             return '(' + this.connective + this.formula.toDisplayString(false) + ')';
+        }
+    }
+
+    toLaTeX(topLevel: boolean): string {
+        if(topLevel) {
+            return connectiveToLaTeX[''+this.connective] + this.formula.toLaTeX(false);
+        } else {
+            return '(' + connectiveToLaTeX[''+this.connective] + this.formula.toLaTeX(false) + ')';
         }
     }
 
@@ -270,6 +320,7 @@ class UnaryConnective<V extends IVariable<V>, P, C, Q, O, T extends GenericTerm<
 
 class BinaryConnective<V extends IVariable<V>, P, C, Q, O, T extends GenericTerm<V, O>> implements GenericFormula<V, P, C, Q, O, T> {
     constructor(readonly leftFormula: GenericFormula<V, P, C, Q, O, T>, readonly connective: C, readonly rightFormula: GenericFormula<V, P, C, Q, O, T>) { }
+
     match<A>(predicateCase: (predicate: P, ...terms: Array<T>) => A,
              nullaryCase: (connective: C) => A,
              unaryCase: (connective: C, formula: GenericFormula<V, P, C, Q, O, T>) => A,
@@ -287,6 +338,14 @@ class BinaryConnective<V extends IVariable<V>, P, C, Q, O, T extends GenericTerm
             return this.leftFormula.toDisplayString(false) + this.connective + this.rightFormula.toDisplayString(false);
         } else {
             return '(' + this.leftFormula.toDisplayString(false) + this.connective + this.rightFormula.toDisplayString(false) + ')';
+        }
+    }
+
+    toLaTeX(topLevel: boolean): string {
+        if(topLevel) {
+            return this.leftFormula.toLaTeX(false) + connectiveToLaTeX[''+this.connective] + this.rightFormula.toLaTeX(false);
+        } else {
+            return '(' + this.leftFormula.toLaTeX(false) + connectiveToLaTeX[''+this.connective] + this.rightFormula.toLaTeX(false) + ')';
         }
     }
 
@@ -309,6 +368,7 @@ class BinaryConnective<V extends IVariable<V>, P, C, Q, O, T extends GenericTerm
 
 class Quantifier<V extends IVariable<V>, P, C, Q, O, T extends GenericTerm<V, O>> implements GenericFormula<V, P, C, Q, O, T> {
     constructor(readonly quantifier: Q, readonly variable: V, readonly formula: GenericFormula<V, P, C, Q, O, T>) {}
+
     match<A>(predicateCase: (predicate: P, ...terms: Array<T>) => A,
              nullaryCase: (connective: C) => A,
              unaryCase: (connective: C, formula: GenericFormula<V, P, C, Q, O, T>) => A,
@@ -325,7 +385,15 @@ class Quantifier<V extends IVariable<V>, P, C, Q, O, T extends GenericTerm<V, O>
         if(topLevel) {
             return this.quantifier + this.variable.toDisplayString(false) + '.' + this.formula.toDisplayString(false);
         } else {
-            return '(' + this.quantifier + this.variable.toDisplayString(false) + '.' + this.formula.toDisplayString(false) + ')';
+            return '(' + this.quantifier + this.variable.toDisplayString(false) + '.' + this.formula.toDisplayString(true) + ')';
+        }
+    }
+
+    toLaTeX(topLevel: boolean): string {
+        if(topLevel) {
+            return connectiveToLaTeX[''+this.quantifier] + this.variable.toLaTeX(false) + '.' + this.formula.toLaTeX(false);
+        } else {
+            return '(' + connectiveToLaTeX[''+this.quantifier] + this.variable.toLaTeX(false) + '.' + this.formula.toLaTeX(true) + ')';
         }
     }
 
@@ -388,14 +456,15 @@ function formulaFromJson(json: Json): SimpleFormula | null {
 
 /* Goals ************************************************************************************************************************************************************/
 
-interface GenericGoal<V extends IVariable<V>, O, F extends ToJson & Display & FreeVariables<V, GenericTerm<V, O>>> extends ToJson, Display, FreeVariables<V, GenericTerm<V, O>> {
+interface GenericGoal<V extends IVariable<V>, O, F extends ToJson & Display & LaTeX & FreeVariables<V, GenericTerm<V, O>>> extends ToJson, Display, LaTeX, FreeVariables<V, GenericTerm<V, O>> {
     match<A>(f: (premises: Array<F>, consequences: Array<F>) => A): A;
     readonly premises: Array<F>;
     readonly consequences: Array<F>;
 }
 
-class Goal<V extends IVariable<V>, O, F extends ToJson & Display & FreeVariables<V, GenericTerm<V, O>>> implements GenericGoal<V, O, F> {
+class Goal<V extends IVariable<V>, O, F extends ToJson & Display & LaTeX & FreeVariables<V, GenericTerm<V, O>>> implements GenericGoal<V, O, F> {
     constructor(readonly premises: Array<F>, readonly consequences: Array<F>) {}
+
     match<A>(f: (premises: Array<F>, consequences: Array<F>) => A): A {
         return f(this.premises, this.consequences);
     }
@@ -406,6 +475,10 @@ class Goal<V extends IVariable<V>, O, F extends ToJson & Display & FreeVariables
 
     toDisplayString(topLevel: boolean): string {
         return this.premises.map(p => p.toDisplayString(true)).join(', ') + ' ⊢ ' + this.consequences.map(c => c.toDisplayString(true)).join(', ');
+    }
+
+    toLaTeX(topLevel: boolean): string {
+        return this.premises.map(p => p.toLaTeX(true)).join(', ') + '\\vdash ' + this.consequences.map(c => c.toLaTeX(true)).join(', ');
     }
 
     toJson(): Json {
@@ -424,15 +497,6 @@ function goalFromJson(json: Json): SimpleGoal | null {
 }
 
 /* Lexer ************************************************************************************************************************************************************/
-
-const BOT_SYMBOL = '⊥';
-const TOP_SYMBOL = '⊤';
-const NOT_SYMBOL = '¬';
-const AND_SYMBOL = '∧';
-const OR_SYMBOL = '∨';
-const IMP_SYMBOL = '⇒';
-const FORALL_SYMBOL = '∀';
-const EXISTS_SYMBOL = '∃';
 
 type TokenType = 'NAME' | 'LPAREN' | 'RPAREN' | 'COMMA' | 'PERIOD' | 'TURNSTILE' | 'BOTTOM' | 'TOP' | 'NOT' | 'AND' | 'OR' | 'IMPLIES' | 'FORALL' | 'EXISTS';
 type Token = [TokenType, string];
@@ -487,7 +551,6 @@ export class Lexer {
 
     private innerNext(): Token | 'done' | 'error' {
         const nameRE = Lexer.lexTable[Lexer.NAME_TOKEN];
-        //nameRE.lastIndex = this.position;
         const input = this.inputString.slice(this.position);
         nameRE.lastIndex = 0;
         const nameResult = nameRE.exec(input);
@@ -503,7 +566,6 @@ export class Lexer {
             for(const reName in Lexer.lexTable) {
                 if(reName === Lexer.NAME_TOKEN) continue;
                 const re = Lexer.lexTable[reName as TokenType];
-                //re.lastIndex = this.position;
                 re.lastIndex = 0;
                 const result = re.exec(input);
                 if(result === null) continue;
@@ -734,14 +796,15 @@ function goalFromString(s: string, lax: boolean = true): SimpleGoal | null {
 
 /* Derivations ******************************************************************************************************************************************************/
 
-interface GenericDerivation<G extends ToJson> extends ToJson {
+interface GenericDerivation<G extends ToJson & LaTeX> extends ToJson, LaTeX {
     match<A>(openCase: (conclusion: G) => A, inferenceCase: (name: string, premises: Array<GenericDerivation<G>>, conclusion: G) => A): A;
-conclusion: G;
-            isCompleted(): boolean;
+    conclusion: G;
+    isCompleted(): boolean;
 }
 
-class OpenDerivation<G extends ToJson> implements GenericDerivation<G> {
+class OpenDerivation<G extends ToJson & LaTeX> implements GenericDerivation<G> {
     constructor(readonly conclusion:  G) {}
+
     match<A>(openCase: (conclusion: G) => A, inferenceCase: (name: string, premises: Array<GenericDerivation<G>>, conclusion: G) => A): A {
         return openCase(this.conclusion);
     }
@@ -750,17 +813,26 @@ class OpenDerivation<G extends ToJson> implements GenericDerivation<G> {
         return {c: this.conclusion.toJson()};
     }
 
+    toLaTeX(topLevel: boolean): string {
+        return this.conclusion.toLaTeX(true);
+    }
+
     isCompleted(): boolean { return false; }
 }
 
-class Inference<G extends ToJson> implements GenericDerivation<G> {
+class Inference<G extends ToJson & LaTeX> implements GenericDerivation<G> {
     constructor(readonly name: string, readonly premises: Array<GenericDerivation<G>>, readonly conclusion: G) {}
+
     match<A>(openCase: (conclusion: G) => A, inferenceCase: (name: string, premises: Array<GenericDerivation<G>>, conclusion: G) => A): A {
         return inferenceCase(this.name, this.premises, this.conclusion);
     }
 
     toJson(): Json {
-        return {n: this.name, c: this.conclusion.toJson(), p: this.premises.map(p => p.toJson())};
+        return {n: this.name, c: this.conclusion.toJson(), p: this.premises.map(p => p.toJson())};                     
+    }
+
+    toLaTeX(topLevel: boolean): string {
+        return '\\dfrac{'+this.premises.map(p => p.toLaTeX(true)).join('\\qquad ')+'}{'+this.conclusion.toLaTeX(true)+'}\\rlap{('+this.name+')}';
     }
 
     isCompleted(): boolean { return this.premises.every(p => p.isCompleted()); }
@@ -815,25 +887,29 @@ class ExtendPath implements Path {
 interface DerivationExtender {
     extend(name: string, premises: Array<SimpleDerivation>): SimpleDerivation;
     open(): SimpleDerivation;
-goal: SimpleGoal;
+    goal: SimpleGoal;
 }
 
 class GoalExtender implements DerivationExtender {
     constructor(readonly goal: SimpleGoal) {}
+
     extend(name: string, premises: Array<SimpleDerivation>): SimpleDerivation { return new Inference(name, premises, this.goal); }
+
     open(): SimpleDerivation { return new OpenDerivation(this.goal); }
 }
 
 class InferenceExtender implements DerivationExtender {
     constructor(
-            private readonly name: string,
-            private readonly left: Array<SimpleDerivation>,
-            readonly goal: SimpleGoal,
-            private readonly right: Array<SimpleDerivation>,
-            private readonly extender: DerivationExtender) {}
+        private readonly name: string,
+        private readonly left: Array<SimpleDerivation>,
+        readonly goal: SimpleGoal,
+        private readonly right: Array<SimpleDerivation>,
+        private readonly extender: DerivationExtender) {}
+
     extend(name: string, premises: Array<SimpleDerivation>): SimpleDerivation {
         return this.extender.extend(this.name, this.left.concat(new Inference(name, premises, this.goal), this.right));
     }
+
     open(): SimpleDerivation {
         return this.extender.extend(this.name, this.left.concat(new OpenDerivation(this.goal), this.right));
     }
@@ -852,7 +928,9 @@ class Var implements ValueObject, IVariable<Var> {
         return this.subscript === -1 ? this.name : this.name+'.'+this.subscript;
     }
 
-    toDisplayString(): string { return this.name; } // NOTE: Shouldn't need subscript...
+    toDisplayString(): string { return this.subscript === -1 ? this.name : this.name + '_' + this.subscript; }
+
+    toLaTeX(): string { return this.subscript === -1 ? this.name : this.name + '_{' + this.subscript + '}'; }
 
     hashCode(): number {
         return (hash(this.name) + hash(this.subscript)) | 0;
@@ -889,20 +967,19 @@ function renderFormula(f: SimpleFormula, path: Path, inPremises: boolean, extraC
         const extraData = {extender: extender, formula: f, inPremises: inPremises};
         return f.match(
                 (p, ...ts) => wire(f, id)`<div id="${id}" data=${extraData} class="${'formula active '+extraClasses}"><!--
-                --><span class="predicate"><span class="predicateSymbol">${p}</span>${
-                ts.length === 0 ? '' : '('}${
-                ts.flatMap((t, i) => i+1 === ts.length ? [renderTerm(t)]
-                        : [renderTerm(t), wire()`, `])
+                --><span class="predicate"><span class="predicateSymbol">${p}</span>${ts.length === 0 ? '' : '('}${
+                    ts.flatMap((t, i) => i+1 === ts.length ? [renderTerm(t)]
+                                                           : [renderTerm(t), wire()`, `])
                 }${ts.length === 0 ? '' : ')'}</span></div>`,
                 c => wire(f, id)`<div id="${id}" data=${extraData} class="${'formula active '+extraClasses}"><span class="connective nullary">${c}</span></div>`,
                 (c, f) => wire(f, id)`<div id="${id}" data=${extraData} class="${'formula active '+extraClasses}"><!--
                 --><span class="connective unary">${c}</span>${
-                renderFormula(f, path.extend(1), inPremises, '')
+                    renderFormula(f, path.extend(1), inPremises, '')
                 }</div>`,
                 (lf, c, rf) => wire(f, id)`<div id="${id}" data=${extraData} class="${'formula active '+extraClasses}">${
-                renderFormula(lf, path.extend(1), inPremises, 'left')
+                    renderFormula(lf, path.extend(1), inPremises, 'left')
                 }<span class="connective binary">${c}</span>${
-                renderFormula(rf, path.extend(2), inPremises, 'right')
+                    renderFormula(rf, path.extend(2), inPremises, 'right')
                 }</div>`,
                 (q, v, f) => wire(f, id)`<div id="${id}" data=${extraData} class="${'formula active quantifier '+extraClasses}"><!--
                 --><span class="connective quantifier">${q}</span><!--
@@ -913,26 +990,25 @@ function renderFormula(f: SimpleFormula, path: Path, inPremises: boolean, extraC
     } else {
         return f.match(
                 (p, ...ts) => wire(f, id)`<div id="${id}" class="${'formula '+extraClasses}"><!--
-                --><span class="predicate"><span class="predicateSymbol">${p}</span>${
-                ts.length === 0 ? '' : '('}${
-                ts.flatMap((t, i) => i+1 === ts.length ? [renderTerm(t)]
-                        : [renderTerm(t), wire()`, `])
+                --><span class="predicate"><span class="predicateSymbol">${p}</span>${ts.length === 0 ? '' : '('}${
+                    ts.flatMap((t, i) => i+1 === ts.length ? [renderTerm(t)]
+                                                           : [renderTerm(t), wire()`, `])
                 }${ts.length === 0 ? '' : ')'}</span></div>`,
                 c => wire(f, id)`<div id="${id}" class="${'formula '+extraClasses}"><span class="connective nullary">${c}</span></div>`,
                 (c, f) => wire(f, id)`<div id="${id}" class="${'formula '+extraClasses}">(<!--
                     --><span class="connective unary">${c}</span>${
-                    renderFormula(f, path.extend(1), inPremises, '')
+                        renderFormula(f, path.extend(1), inPremises, '')
                     })</div>`,
                 (lf, c, rf) => wire(f, id)`<div id="${id}" class="${'formula '+extraClasses}">(${
-                    renderFormula(lf, path.extend(1), inPremises, '')
+                        renderFormula(lf, path.extend(1), inPremises, '')
                     }<span class="connective binary">${c}</span>${
-                    renderFormula(rf, path.extend(2), inPremises, '')
+                        renderFormula(rf, path.extend(2), inPremises, '')
                     })</div>`,
                 (q, v, f) => wire(f, id)`<div id="${id}" class="${'formula quantifier '+extraClasses}">(<!--
                     --><span class="connective quantifier">${q}</span><!--
                     --><span class="boundVariable">${v.name}${v.subscript !== -1 ? [wire()`<sub>${v.subscript}</sub>`] : []}</span><!--
                     --><span class="quantifierSeparator">.</span>${
-                    renderFormula(f, path.extend(1), inPremises, '')
+                        renderFormula(f, path.extend(1), inPremises, '')
                     })</div>`);
     }
 }
@@ -945,13 +1021,13 @@ function renderGoal(g: SimpleGoal, path: Path, extender: DerivationExtender): El
             const csLenm1 = cs.length - 1;
             return wire(g, id)`<div id="${id}" class="goal">${
             wire(ps, id)`<div id="${id+"premises"}" class="premises context">${
-            ps.flatMap((p, i) => i === psLenm1 ? [renderFormula(p, path.extend(i), true, 'topLevel', extender)]
-                    : [renderFormula(p, path.extend(i), true, 'topLevel', extender), wire()`, `])
+                ps.flatMap((p, i) => i === psLenm1 ? [renderFormula(p, path.extend(i), true, 'topLevel', extender)]
+                                                   : [renderFormula(p, path.extend(i), true, 'topLevel', extender), wire()`, `])
             }</div>`
             }<span class="turnstile" title="reset" data=${{extender: extender}}>⊢</span>${ // TODO: Only show title text for active elements.
             wire(cs, id)`<div id="${id+"consequences"}" class="consequences context">${
-            cs.flatMap((c, i) => i === csLenm1 ? [renderFormula(c, path.extend(i+psLen), false, 'topLevel', extender)]
-                    : [renderFormula(c, path.extend(i+psLen), false, 'topLevel', extender), wire()`, `])
+                cs.flatMap((c, i) => i === csLenm1 ? [renderFormula(c, path.extend(i+psLen), false, 'topLevel', extender)]
+                                                   : [renderFormula(c, path.extend(i+psLen), false, 'topLevel', extender), wire()`, `])
             }</div>`
             }</div>`
             });
@@ -965,19 +1041,19 @@ function renderDerivation(d: SimpleDerivation, path: Path, extender: DerivationE
             (n, ps, c) =>
             wire(d, id)`<div id="${id}" class="${classes + ' closed'}"><!--
             --><div class="row rulePremise">${
-            ps.map((p, i) => {
+                ps.map((p, i) => {
                     const newExtender = new InferenceExtender(
-                            n,
-                            ps.slice(0, i),
-                            p.conclusion,
-                            ps.slice(i+1),
-                            extender);
+                        n,
+                        ps.slice(0, i),
+                        p.conclusion,
+                        ps.slice(i+1),
+                        extender);
                     return renderDerivation(p, path.extend(i), newExtender, i === 0);
-                    })
+                })
             }</div><!--
             --><div class="tag" title="${renderTagTitle(n)}">${n}</div><!--
             --><div class="row ruleConclusion">${
-            renderGoal(c, path.extend(ps.length), extender)
+                renderGoal(c, path.extend(ps.length), extender)
             }</div></div>`);
 }
 
@@ -1057,75 +1133,71 @@ function infers(name: string, premises: Array<SimpleDerivation>, conclusion: Sim
 /* Events ***********************************************************************************************************************************************************/
 
 interface InputEvent {
-    match<A>(
-            applyTacticCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean, leftRight?: boolean) => A,
-            contractCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean) => A,
-            instantiateCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean, term: SimpleTerm) => A): A;
+    match<A>(applyTacticCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean, leftRight?: boolean) => A,
+             contractCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean) => A,
+             instantiateCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean, term: SimpleTerm) => A): A;
 }
 
 class ApplyTactic implements InputEvent {
     constructor(readonly goal: SimpleGoal, readonly formula: SimpleFormula, readonly inPremises: boolean, readonly leftRight?: boolean) {}
-    match<A>(
-            applyTacticCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean, leftRight?: boolean) => A,
-            contractCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean) => A,
-            instantiateCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean, term: SimpleTerm) => A): A {
+
+    match<A>(applyTacticCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean, leftRight?: boolean) => A,
+             contractCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean) => A,
+             instantiateCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean, term: SimpleTerm) => A): A {
         return applyTacticCase(this.goal, this.formula, this.inPremises, this.leftRight);
     }
 }
 
 class Contract implements InputEvent {
     constructor(readonly goal: SimpleGoal, readonly formula: SimpleFormula, readonly inPremises: boolean) {}
-    match<A>(
-            applyTacticCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean, leftRight?: boolean) => A,
-            contractCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean) => A,
-            instantiateCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean, term: SimpleTerm) => A): A {
+
+    match<A>(applyTacticCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean, leftRight?: boolean) => A,
+             contractCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean) => A,
+             instantiateCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean, term: SimpleTerm) => A): A {
         return contractCase(this.goal, this.formula, this.inPremises);
     }
 }
 
 class Instantiate implements InputEvent {
     constructor(readonly goal: SimpleGoal, readonly formula: SimpleFormula, readonly inPremises: boolean, readonly term: SimpleTerm) {}
-    match<A>(
-            applyTacticCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean, leftRight?: boolean) => A,
-            contractCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean) => A,
-            instantiateCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean, term: SimpleTerm) => A): A {
+
+    match<A>(applyTacticCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean, leftRight?: boolean) => A,
+             contractCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean) => A,
+             instantiateCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean, term: SimpleTerm) => A): A {
         return instantiateCase(this.goal, this.formula, this.inPremises, this.term);
     }
 }
 
 interface OutputEvent {
-    match<A>(
-            failedCase: (message: string) => A,
-            newGoalsCase: (name: string, goals: Array<SimpleGoal>) => A,
-            contractOrInstantiateCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean) => A): A;
+    match<A>(failedCase: (message: string) => A,
+             newGoalsCase: (name: string, goals: Array<SimpleGoal>) => A,
+             contractOrInstantiateCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean) => A): A;
 }
 
 class Failed implements OutputEvent {
     constructor(readonly message: string) {}
-    match<A>(
-            failedCase: (message: string) => A,
-            newGoalsCase: (name: string, goals: Array<SimpleGoal>) => A,
-            contractOrInstantiateCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean) => A): A {
+
+    match<A>(failedCase: (message: string) => A,
+             newGoalsCase: (name: string, goals: Array<SimpleGoal>) => A,
+             contractOrInstantiateCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean) => A): A {
         return failedCase(this.message);
     }
 }
 
 class NewGoals implements OutputEvent {
     constructor(readonly name: string, readonly goals: Array<SimpleGoal>) {}
-    match<A>(
-            failedCase: (message: string) => A,
-            newGoalsCase: (name: string, goals: Array<SimpleGoal>) => A,
-            contractOrInstantiateCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean) => A): A {
+    match<A>(failedCase: (message: string) => A,
+             newGoalsCase: (name: string, goals: Array<SimpleGoal>) => A,
+             contractOrInstantiateCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean) => A): A {
         return newGoalsCase(this.name, this.goals);
     }
 }
 
 class ContractOrInstantiate implements OutputEvent {
     constructor(readonly goal: SimpleGoal, readonly formula: SimpleFormula, readonly inPremises: boolean) {}
-    match<A>(
-            failedCase: (message: string) => A,
-            newGoalsCase: (name: string, goals: Array<SimpleGoal>) => A,
-            contractOrInstantiateCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean) => A): A {
+    match<A>(failedCase: (message: string) => A,
+             newGoalsCase: (name: string, goals: Array<SimpleGoal>) => A,
+             contractOrInstantiateCase: (goal: SimpleGoal, formula: SimpleFormula, inPremises: boolean) => A): A {
         return contractOrInstantiateCase(this.goal, this.formula, this.inPremises);
     }
 }
@@ -1142,113 +1214,113 @@ type Logic = (input: InputEvent) => OutputEvent;
 
 // Test case:  ¬(A ∨ ¬A) ⇒ ⊥
 const ljCalculus: Logic = (input) => input.match(
-        (goal, formula, inPremises, leftRight) => formula.match<OutputEvent>( // TODO: Refactor and finish.
-            (predicate, ...terms) => {
-                if(inPremises) {
-                    if(goal.consequences[0].matches(predicate, terms)) {
-                        return new NewGoals('Ax', []);
-                    } else {
-                        return new Failed('Formula does not match conclusion.');
-                    }
+    (goal, formula, inPremises, leftRight) => formula.match<OutputEvent>( // TODO: Refactor and finish.
+        (predicate, ...terms) => {
+            if(inPremises) {
+                if(goal.consequences[0].matches(predicate, terms)) {
+                    return new NewGoals('Ax', []);
                 } else {
-                    if(goal.premises.some(c => c.matches(predicate, terms))) {
-                        return new NewGoals('Ax', []);
-                    } else {
-                        return new Failed('Formula not found in premises.');
-                    }
+                    return new Failed('Formula does not match conclusion.');
                 }
-            },
-            connective => {
-                switch(connective) {
-                    case TOP_SYMBOL:
-                        if(inPremises) {
-                            return new NewGoals('⊤L', [new Goal(goal.premises.filter(f => f !== formula), goal.consequences)]);
-                        } else {
-                            return new NewGoals('⊤R', []);
-                        }
-                    case BOT_SYMBOL:
-                        if(inPremises) {
+            } else {
+                if(goal.premises.some(c => c.matches(predicate, terms))) {
+                    return new NewGoals('Ax', []);
+                } else {
+                    return new Failed('Formula not found in premises.');
+                }
+            }
+        },
+        connective => {
+            switch(connective) {
+                case TOP_SYMBOL:
+                    if(inPremises) {
+                        return new NewGoals('⊤L', [new Goal(goal.premises.filter(f => f !== formula), goal.consequences)]);
+                    } else {
+                        return new NewGoals('⊤R', []);
+                    }
+                case BOT_SYMBOL:
+                    if(inPremises) {
+                        return new NewGoals('⊥L', []);
+                    } else {
+                        // TODO: Make ⊥ not clickable in conclusion.
+                        // Behave as if we clicked on ⊥ in the premises, if there is a ⊥.
+                        if(goal.premises.some(p => p instanceof NullaryConnective && p.connective === BOT_SYMBOL)) {
                             return new NewGoals('⊥L', []);
                         } else {
-                            // TODO: Make ⊥ not clickable in conclusion.
-                            // Behave as if we clicked on ⊥ in the premises, if there is a ⊥.
-                            if(goal.premises.some(p => p instanceof NullaryConnective && p.connective === BOT_SYMBOL)) {
-                                return new NewGoals('⊥L', []);
-                            } else {
-                                return new Failed('Didn\'t find ⊥ in premises. TODO: Need to make this option inaccessible.');
-                            }
+                            return new Failed('Didn\'t find ⊥ in premises. TODO: Need to make this option inaccessible.');
                         }
-                    default:
-                        throw 'Not implemented.';
                     }
-            },
-            (connective, f2) => {
-                switch(connective) {
-                    case NOT_SYMBOL:
-                        if(inPremises) {
-                            // TODO: This performs the contraction that LJT eliminates, i.e. duplicating formula in the first goal.
-                            return new NewGoals('⇒L', [new Goal(goal.premises, [f2])]);
-                        } else {
-                            return new NewGoals('¬R', [new Goal(goal.premises.concat(f2), [new NullaryConnective(BOT_SYMBOL)])]);
-                        }
-                    default:
-                        throw 'Not implemented.';
+                default:
+                    throw 'Not implemented.';
                 }
-            },
-            (lf, connective, rf) => {
-                switch(connective) {
-                    case AND_SYMBOL:
-                        if(inPremises) {
-                            // NOTE: This is treating ∧ like ∧^+ (i.e. with a positive polarity).
-                            return new NewGoals('∧L', [new Goal(goal.premises.filter(f => f !== formula).concat(lf,rf), goal.consequences)]);
-                        } else {
-                            return new NewGoals('∧R', [new Goal(goal.premises, [lf]), new Goal(goal.premises, [rf])]);
-                        }
-                    case OR_SYMBOL:
-                        if(inPremises) {
-                            const ps = goal.premises.filter(f => f !== formula);
-                            return new NewGoals('∨L', [new Goal(ps.concat(lf), goal.consequences),
-                                    new Goal(ps.concat(rf), goal.consequences)]);
-                        } else {
-                            if(leftRight === void(0)) return new Failed('Select left or right subformula.');
-                            return new NewGoals('∨R', [new Goal(goal.premises, [leftRight ? lf : rf])]);
-                        }
-                    case IMP_SYMBOL:
-                        if(inPremises) {
-                            // TODO: This performs the contraction that LJT eliminates, i.e. duplicating formula in the first goal.
-                            const ps = goal.premises.filter(f => f !== formula);
-                            return new NewGoals('⇒L', [new Goal(goal.premises, [lf]),
-                                    new Goal(ps.concat(rf), goal.consequences)]);
-                        } else {
-                            return new NewGoals('⇒R', [new Goal(goal.premises.concat(lf), [rf])]);
-                        }
-                    default:
-                        throw 'Not implemented.';
-                }
-            },
-            (quantifier, v, f2) => {
-                switch(quantifier) {
-                    case FORALL_SYMBOL:
+        },
+        (connective, f2) => {
+            switch(connective) {
+                case NOT_SYMBOL:
                     if(inPremises) {
-                        return new ContractOrInstantiate(goal, formula, inPremises);
+                        // TODO: This performs the contraction that LJT eliminates, i.e. duplicating formula in the first goal.
+                        return new NewGoals('¬L', [new Goal(goal.premises, [f2])]);
                     } else {
-                        const variableContext = goal.freeVariables();
-                        const f3 = variableContext.has(v) ? f2.alphaRename(v, v.freshen(variableContext)) : f2;
-                        return new NewGoals('∀R', [new Goal(goal.premises, [f3])]);
-                    }
-                case EXISTS_SYMBOL:
-                    if(inPremises) {
-                        const variableContext = goal.freeVariables();
-                        const f3 = variableContext.has(v) ? f2.alphaRename(v, v.freshen(variableContext)) : f2;
-                        return new NewGoals('∃L', [new Goal(goal.premises.filter(f => f !== formula).concat(f3), goal.consequences)]);
-                    } else {
-                        // TODO: Need to indicate not to show contract button.
-                        return new ContractOrInstantiate(goal, formula, inPremises);
+                        return new NewGoals('¬R', [new Goal(goal.premises.concat(f2), [new NullaryConnective(BOT_SYMBOL)])]);
                     }
                 default:
                     throw 'Not implemented.';
             }
-        }),
+        },
+        (lf, connective, rf) => {
+            switch(connective) {
+                case AND_SYMBOL:
+                    if(inPremises) {
+                        // NOTE: This is treating ∧ like ∧^+ (i.e. with a positive polarity).
+                        return new NewGoals('∧L', [new Goal(goal.premises.filter(f => f !== formula).concat(lf,rf), goal.consequences)]);
+                    } else {
+                        return new NewGoals('∧R', [new Goal(goal.premises, [lf]), new Goal(goal.premises, [rf])]);
+                    }
+                case OR_SYMBOL:
+                    if(inPremises) {
+                        const ps = goal.premises.filter(f => f !== formula);
+                        return new NewGoals('∨L', [new Goal(ps.concat(lf), goal.consequences),
+                                new Goal(ps.concat(rf), goal.consequences)]);
+                    } else {
+                        if(leftRight === void(0)) return new Failed('Select left or right subformula.');
+                        return new NewGoals(`∨R_${leftRight ? '1' : '2'}`, [new Goal(goal.premises, [leftRight ? lf : rf])]);
+                    }
+                case IMP_SYMBOL:
+                    if(inPremises) {
+                        // TODO: This performs the contraction that LJT eliminates, i.e. duplicating formula in the first goal.
+                        const ps = goal.premises.filter(f => f !== formula);
+                        return new NewGoals('⇒L', [new Goal(goal.premises, [lf]),
+                                new Goal(ps.concat(rf), goal.consequences)]);
+                    } else {
+                        return new NewGoals('⇒R', [new Goal(goal.premises.concat(lf), [rf])]);
+                    }
+                default:
+                    throw 'Not implemented.';
+            }
+        },
+        (quantifier, v, f2) => {
+            switch(quantifier) {
+                case FORALL_SYMBOL:
+                if(inPremises) {
+                    return new ContractOrInstantiate(goal, formula, inPremises);
+                } else {
+                    const variableContext = goal.freeVariables();
+                    const f3 = variableContext.has(v) ? f2.alphaRename(v, v.freshen(variableContext)) : f2;
+                    return new NewGoals('∀R', [new Goal(goal.premises, [f3])]);
+                }
+            case EXISTS_SYMBOL:
+                if(inPremises) {
+                    const variableContext = goal.freeVariables();
+                    const f3 = variableContext.has(v) ? f2.alphaRename(v, v.freshen(variableContext)) : f2;
+                    return new NewGoals('∃L', [new Goal(goal.premises.filter(f => f !== formula).concat(f3), goal.consequences)]);
+                } else {
+                    // TODO: Need to indicate not to show contract button.
+                    return new ContractOrInstantiate(goal, formula, inPremises);
+                }
+            default:
+                throw 'Not implemented.';
+        }
+    }),
     (goal, formula, inPremises) => {
         // TODO: Don't allow contraction for conclusion.
         if(!inPremises) new Failed('Can\'t contract right. TODO: Need to make this option inaccessible.');
@@ -1394,73 +1466,120 @@ const classicalSequentCalculus: Logic = (input) => input.match(
         }
     });
 
+const logics: {[l: string]: Logic} = {
+    lk: classicalSequentCalculus,
+    lj: ljCalculus
+};
+
 /* Main *************************************************************************************************************************************************************/
 
-const A = predicate('A');
-const B = predicate('B');
-const x = new Var('x');
-const y = new Var('y');
+export function main(options : {logic: 'lk' | 'lj'}) {
+    const A = predicate('A');
+    const B = predicate('B');
+    const x = new Var('x');
+    const y = new Var('y');
 
-let example: SimpleDerivation = open(entails([], [implies(implies(implies(A, B), A), A)]));
-//let example: SimpleDerivation = open(entails([forall(x, forall(y, predicate('P', variable(x), variable(y))))], [exists(x, exists(y, predicate('P', variable(x), variable(y))))]));
+    let example: SimpleDerivation = open(entails([], [implies(implies(implies(A, B), A), A)]));
+    //let example: SimpleDerivation = open(entails([forall(x, forall(y, predicate('P', variable(x), variable(y))))], [exists(x, exists(y, predicate('P', variable(x), variable(y))))]));
 
-const container = document.getElementById('container');
-const toast = document.getElementById('toast');
-const popup = document.getElementById('popup');
-const goalInput = document.getElementById('goalInput');
-const termInput = document.getElementById('termInput');
-const termBtn = document.getElementById('termBtn');
-const contractBtn = document.getElementById('contractBtn');
-if(popup === null) throw 'Popup missing.';
-if(toast === null) throw 'Toast missing.';
-if(goalInput === null) throw 'Goal Input missing.';
-if(termInput === null) throw 'Term Input missing.';
-if(termBtn === null) throw 'Term button missing.';
-if(contractBtn === null) throw 'Contract button missing.';
-if(container === null) throw 'Container missing.';
+    const container = document.getElementById('container');
+    const toast = document.getElementById('toast');
+    const popup = document.getElementById('popup');
+    const goalInput = document.getElementById('goalInput');
+    const termInput = document.getElementById('termInput');
+    const termBtn = document.getElementById('termBtn');
+    const contractBtn = document.getElementById('contractBtn');
+    const latexBtn = document.getElementById('latexBtn');
+    const latex = document.getElementById('latex');
+    if(container === null) throw 'Container missing.';
+    if(popup === null) throw 'Popup missing.';
+    if(toast === null) throw 'Toast missing.';
+    if(goalInput === null) throw 'Goal Input missing.';
+    if(termInput === null) throw 'Term Input missing.';
+    if(termBtn === null) throw 'Term button missing.';
+    if(contractBtn === null) throw 'Contract button missing.';
+    if(latexBtn === null) throw 'LaTeX button missing.';
+    if(latex === null) throw 'LaTeX container missing.';
 
-const logic = classicalSequentCalculus;
+    const logic = logics[options.logic];
 
-const derivationFromHash = () => {
-    try {
-        // Compress and decompress? http://lzma-js.github.io/LZMA-JS/ or http://pieroxy.net/blog/pages/lz-string/index.html
-        const derivationJson = JSON.parse(decompressFromEncodedURIComponent(location.hash.slice(1)));
-        if(derivationJson !== void(0)) {
-            const json = expandCse(derivationJson);
-            const derivation = derivationFromJson(json);
-            if(derivation !== null) {
-                example = derivation;
-                (goalInput as any).value = '';
+    const derivationFromHash = () => {
+        try {
+            // Compress and decompress? http://lzma-js.github.io/LZMA-JS/ or http://pieroxy.net/blog/pages/lz-string/index.html
+            const derivationJson = JSON.parse(decompressFromEncodedURIComponent(location.hash.slice(1)));
+            if(derivationJson !== void(0)) {
+                const json = expandCse(derivationJson);
+                const derivation = derivationFromJson(json);
+                if(derivation !== null) {
+                    example = derivation;
+                    (goalInput as any).value = '';
+                } else {
+                    console.log({expanded: json, unexpanded: derivationJson, string: location.hash.slice(1)});
+                }
+            }
+        } catch(SyntaxError) {} // Ignore SyntaxErrors
+    };
+
+    const refresh = (changeHash: boolean = true) => {
+        document.title = 'Proving ' + example.conclusion.toDisplayString(true);
+        if(changeHash) location.hash = '#'+compressToEncodedURIComponent(JSON.stringify(cse(example.toJson())));
+        bind(container)`${renderDerivation(example, new StartPath('root.'), new GoalExtender(example.conclusion), true, true)}`;
+    };
+
+    const SHOWN_CLASS = 'shown';
+
+    const onClick = (event: MouseEvent) => {
+        const target: any = event.target;
+        let extraData = target.data as {extender: DerivationExtender, formula?: SimpleFormula, inPremises?: boolean};
+        if(target.data === void(0)) {
+            const closest = target.closest('.active');
+            if(closest === null) return;
+            extraData = closest.data; // TODO: Include some information about the clicked element.
+        }
+
+        if(extraData.formula === void(0)) {
+            example = extraData.extender.open();
+        } else {
+            //const output = classicalSequentCalculus(new ApplyTactic(extraData.extender.goal, extraData.formula, extraData.inPremises!!));
+            const leftRight = target.closest('.left') ? true : target.closest('.right') ? false : void(0);
+            const output = logic(new ApplyTactic(extraData.extender.goal, extraData.formula, extraData.inPremises!!, leftRight));
+            example = output.match(
+                (message) => {
+                    toast.textContent = message;
+                    toast.classList.add(SHOWN_CLASS);
+                    return example;
+                },
+                (name, goals) => extraData.extender.extend(name, goals.map(g => new OpenDerivation(g))),
+                (goal, formula, inPremises) => {
+                    (popup as any).data = extraData;
+                    popup.style.left = (event.pageX-45) + 'px';
+                    popup.style.top = (event.pageY-40) + 'px';
+                    popup.classList.add(SHOWN_CLASS);
+                    termInput.focus();
+                    return example;
+                });
+        }
+        refresh();
+    };
+
+    const onTermInput = (event: Event) => {
+        const extraData = (popup as any).data as {extender: DerivationExtender, formula: SimpleFormula, inPremises: boolean};
+        let output: OutputEvent;
+        if(event.target === contractBtn) {
+            //output = classicalSequentCalculus(new Contract(extraData.extender.goal, extraData.formula, extraData.inPremises));
+            output = logic(new Contract(extraData.extender.goal, extraData.formula, extraData.inPremises));
+        } else { // termBtn was clicked or termInput changed, either way do the same thing
+            const termString: string = (termInput as any).value;
+            const term = termFromString(termString);
+            if(term === null) {
+                output = new Failed(`Failed to parse term: ${termString}`);
             } else {
-                console.log({expanded: json, unexpanded: derivationJson, string: location.hash.slice(1)});
+                //output = classicalSequentCalculus(new Instantiate(extraData.extender.goal, extraData.formula, extraData.inPremises, term));
+                output = logic(new Instantiate(extraData.extender.goal, extraData.formula, extraData.inPremises, term));
             }
         }
-    } catch(SyntaxError) {} // Ignore SyntaxErrors
-};
-
-const refresh = (changeHash: boolean = true) => {
-    document.title = 'Proving ' + example.conclusion.toDisplayString(true);
-    if(changeHash) location.hash = '#'+compressToEncodedURIComponent(JSON.stringify(cse(example.toJson())));
-    bind(container)`${renderDerivation(example, new StartPath('root.'), new GoalExtender(example.conclusion), true, true)}`;
-};
-
-const SHOWN_CLASS = 'shown';
-
-const onClick = (event: MouseEvent) => {
-    const target: any = event.target;
-    let extraData = target.data as {extender: DerivationExtender, formula?: SimpleFormula, inPremises?: boolean};
-    if(target.data === void(0)) {
-        const closest = target.closest('.active');
-        if(closest === null) return;
-        extraData = closest.data; // TODO: Include some information about the clicked element.
-    }
-
-    if(extraData.formula === void(0)) {
-        example = extraData.extender.open();
-    } else {
-        //const output = classicalSequentCalculus(new ApplyTactic(extraData.extender.goal, extraData.formula, extraData.inPremises!!));
-        const leftRight = target.closest('.left') ? true : target.closest('.right') ? false : void(0);
-        const output = logic(new ApplyTactic(extraData.extender.goal, extraData.formula, extraData.inPremises!!, leftRight));
+        (termInput as any).value = '';
+        popup.classList.remove(SHOWN_CLASS);
         example = output.match(
             (message) => {
                 toast.textContent = message;
@@ -1469,71 +1588,37 @@ const onClick = (event: MouseEvent) => {
             },
             (name, goals) => extraData.extender.extend(name, goals.map(g => new OpenDerivation(g))),
             (goal, formula, inPremises) => {
-                (popup as any).data = extraData;
-                popup.style.left = (event.pageX-45) + 'px';
-                popup.style.top = (event.pageY-40) + 'px';
-                popup.classList.add(SHOWN_CLASS);
-                termInput.focus();
-                return example;
+                throw "Shouldn't happen"; // Right?
             });
-    }
-    refresh();
-};
-
-const onTermInput = (event: Event) => {
-    const extraData = (popup as any).data as {extender: DerivationExtender, formula: SimpleFormula, inPremises: boolean};
-    let output: OutputEvent;
-    if(event.target === contractBtn) {
-        //output = classicalSequentCalculus(new Contract(extraData.extender.goal, extraData.formula, extraData.inPremises));
-        output = logic(new Contract(extraData.extender.goal, extraData.formula, extraData.inPremises));
-    } else { // termBtn was clicked or termInput changed, either way do the same thing
-        const termString: string = (termInput as any).value;
-        const term = termFromString(termString);
-        if(term === null) {
-            output = new Failed(`Failed to parse term: ${termString}`);
-        } else {
-            //output = classicalSequentCalculus(new Instantiate(extraData.extender.goal, extraData.formula, extraData.inPremises, term));
-            output = logic(new Instantiate(extraData.extender.goal, extraData.formula, extraData.inPremises, term));
-        }
-    }
-    (termInput as any).value = '';
-    popup.classList.remove(SHOWN_CLASS);
-    example = output.match(
-        (message) => {
-            toast.textContent = message;
-            toast.classList.add(SHOWN_CLASS);
-            return example;
-        },
-        (name, goals) => extraData.extender.extend(name, goals.map(g => new OpenDerivation(g))),
-        (goal, formula, inPremises) => {
-            throw "Shouldn't happen"; // Right?
-        });
-    refresh();
-};
-
-const onGoalInput = (event: Event) => {
-    const goalText: string = (goalInput as any).value;
-    const goal = goalFromString(goalText);
-    if(goal === null) {
-        toast.textContent = 'Failed to parse goal.';
-        toast.classList.add(SHOWN_CLASS);
-    } else {
-        example = new OpenDerivation(goal);
         refresh();
-    }
-};
+    };
 
-const onAnimationEnd = (event: Event) => toast.classList.remove(SHOWN_CLASS);
-const onMouseLeave = (event: Event) => { (popup as any).data = void(0); popup.classList.remove(SHOWN_CLASS); };
-const onHashChange = (event: Event) => { derivationFromHash(); refresh(false); };
+    const onGoalInput = (event: Event) => {
+        const goalText: string = (goalInput as any).value;
+        const goal = goalFromString(goalText);
+        if(goal === null) {
+            toast.textContent = 'Failed to parse goal.';
+            toast.classList.add(SHOWN_CLASS);
+        } else {
+            example = new OpenDerivation(goal);
+            refresh();
+        }
+    };
 
-const scheduler = newDefaultScheduler();
-runEffects(tap(onClick, click(container, true)), scheduler);
-runEffects(tap(onTermInput, merge(change(termInput), merge(click(termBtn), click(contractBtn)))), scheduler);
-runEffects(tap(onGoalInput, change(goalInput)), scheduler);
-runEffects(tap(onAnimationEnd, domEvent('animationend', toast)), scheduler);
-runEffects(tap(onMouseLeave, mouseleave(popup)), scheduler);
-runEffects(tap(onHashChange, hashchange(window)), scheduler);
+    const onAnimationEnd = (event: Event) => toast.classList.remove(SHOWN_CLASS);
+    const onMouseLeave = (event: Event) => { (popup as any).data = void(0); popup.classList.remove(SHOWN_CLASS); };
+    const onHashChange = (event: Event) => { derivationFromHash(); refresh(false); };
+    const onLaTeX = (event: Event) => { latex.textContent = example.toLaTeX(true); };
 
-derivationFromHash();
-refresh(false);
+    const scheduler = newDefaultScheduler();
+    runEffects(tap(onClick, click(container, true)), scheduler);
+    runEffects(tap(onTermInput, merge(change(termInput), merge(click(termBtn), click(contractBtn)))), scheduler);
+    runEffects(tap(onGoalInput, change(goalInput)), scheduler);
+    runEffects(tap(onAnimationEnd, domEvent('animationend', toast)), scheduler);
+    runEffects(tap(onMouseLeave, mouseleave(popup)), scheduler);
+    runEffects(tap(onHashChange, hashchange(window)), scheduler);
+    runEffects(tap(onLaTeX, click(latexBtn)), scheduler);
+
+    derivationFromHash();
+    refresh(false);
+}
