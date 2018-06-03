@@ -1466,19 +1466,17 @@ const logics: {[l: string]: Logic} = {
 
 /* Main *************************************************************************************************************************************************************/
 
-export function main(containerId: string, options : {logic: 'lk' | 'lj', toLaTeX?: boolean, showInput?: boolean}) {
-    const A = predicate('A');
-    const B = predicate('B');
-    const x = new Var('x');
-    const y = new Var('y');
-
-    let example: SimpleDerivation = open(entails([], [implies(implies(implies(A, B), A), A)]));
-    //let example: SimpleDerivation = open(entails([forall(x, forall(y, predicate('P', variable(x), variable(y))))], [exists(x, exists(y, predicate('P', variable(x), variable(y))))]));
-
+export function main(containerId: string, options : {logic: 'lk' | 'lj', toLaTeX?: boolean, showInput?: boolean, defaultGoal?: string}) {
     const container = document.getElementById(containerId);
     if(container === null) throw `Container missing. Element with ${containerId} not found.`;
 
-    const goalInput = wire()`<input type="text" id="goalInput" value="((A -> B) -> A) -> A"/>`;
+    const defaultGoalString = options.defaultGoal || '((A \\/ B) -> C) -> ((A -> C) /\\ (B -> C))';
+    const defaultGoal = goalFromString(defaultGoalString);
+    if(defaultGoal === null) throw `Error parsing default goal: ${defaultGoalString}`;
+
+    let example: SimpleDerivation = open(defaultGoal);
+
+    const goalInput = wire()`<input type="text" id="goalInput" value="${defaultGoalString}"/>`;
 
     const toast = wire()`<div id="toast"></div>`;
     const termInput = wire()`<input type="text" id="termInput"/>`;
