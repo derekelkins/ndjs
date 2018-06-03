@@ -46,7 +46,7 @@
     Term ::= NAME (LPAREN TermList RPAREN)?
     TermList ::= Term (COMMA Term)*
 
-    Formula ::= AtamicFormula FormulaTail
+    Formula ::= AtomicFormula FormulaTail
               | UnaryConnective AtomicFormula
               | Quantifier NAME PERIOD AtomicFormula
     AtomicFormula ::= NAME (LPAREN TermList RPAREN)?
@@ -79,7 +79,7 @@
     </code></pre>
 </div>
 <script type="text/javascript">
-Array.prototype.flatMap = function(f, t) {
+Array.prototype.flatMap = Array.prototype.flatMap || function(f, t) {
     const xss = this.map(f, t);
     let sum = 0;
     const len = xss.length;
