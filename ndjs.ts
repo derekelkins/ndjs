@@ -1301,28 +1301,26 @@ const ljCalculus: Logic = (input) => input.match(
         (quantifier, v, f2) => {
             switch(quantifier) {
                 case FORALL_SYMBOL:
-                if(inPremises) {
-                    return new ContractOrInstantiate(goal, formula, inPremises);
-                } else {
-                    const variableContext = goal.freeVariables();
-                    const f3 = variableContext.has(v) ? f2.alphaRename(v, v.freshen(variableContext)) : f2;
-                    return new NewGoals('∀R', [new Goal(goal.premises, [f3])]);
-                }
-            case EXISTS_SYMBOL:
-                if(inPremises) {
-                    const variableContext = goal.freeVariables();
-                    const f3 = variableContext.has(v) ? f2.alphaRename(v, v.freshen(variableContext)) : f2;
-                    return new NewGoals('∃L', [new Goal(goal.premises.filter(f => f !== formula).concat(f3), goal.consequences)]);
-                } else {
-                    // TODO: Need to indicate not to show contract button.
-                    return new ContractOrInstantiate(goal, formula, inPremises);
-                }
-            default:
-                throw 'Not implemented.';
-        }
-    }),
+                    if(inPremises) {
+                        return new ContractOrInstantiate(goal, formula, inPremises);
+                    } else {
+                        const variableContext = goal.freeVariables();
+                        const f3 = variableContext.has(v) ? f2.alphaRename(v, v.freshen(variableContext)) : f2;
+                        return new NewGoals('∀R', [new Goal(goal.premises, [f3])]);
+                    }
+                case EXISTS_SYMBOL:
+                    if(inPremises) {
+                        const variableContext = goal.freeVariables();
+                        const f3 = variableContext.has(v) ? f2.alphaRename(v, v.freshen(variableContext)) : f2;
+                        return new NewGoals('∃L', [new Goal(goal.premises.filter(f => f !== formula).concat(f3), goal.consequences)]);
+                    } else {
+                        return new ContractOrInstantiate(goal, formula, inPremises);
+                    }
+                default:
+                    throw 'Not implemented.';
+            }
+        }),
     (goal, formula, inPremises) => {
-        // TODO: Don't allow contraction for conclusion.
         if(!inPremises) new Failed('Can\'t contract right. TODO: Need to make this option inaccessible.');
         return new NewGoals('CL', [new Goal(goal.premises.concat(formula), goal.consequences)]);
     },
@@ -1527,6 +1525,8 @@ export function main(options : {logic: 'lk' | 'lj'}) {
     };
 
     const SHOWN_CLASS = 'shown';
+    const FORALL_CLASS = 'forall';
+    const EXISTS_CLASS = 'exists';
 
     const onClick = (event: MouseEvent) => {
         const target: any = event.target;
@@ -1540,7 +1540,6 @@ export function main(options : {logic: 'lk' | 'lj'}) {
         if(extraData.formula === void(0)) {
             example = extraData.extender.open();
         } else {
-            //const output = classicalSequentCalculus(new ApplyTactic(extraData.extender.goal, extraData.formula, extraData.inPremises!!));
             const leftRight = target.closest('.left') ? true : target.closest('.right') ? false : void(0);
             const output = logic(new ApplyTactic(extraData.extender.goal, extraData.formula, extraData.inPremises!!, leftRight));
             example = output.match(
@@ -1554,7 +1553,7 @@ export function main(options : {logic: 'lk' | 'lj'}) {
                     (popup as any).data = extraData;
                     popup.style.left = (event.pageX-45) + 'px';
                     popup.style.top = (event.pageY-40) + 'px';
-                    popup.classList.add(SHOWN_CLASS);
+                    popup.className = 'shown ' + (inPremises ? FORALL_CLASS : EXISTS_CLASS);
                     termInput.focus();
                     return example;
                 });
@@ -1566,7 +1565,6 @@ export function main(options : {logic: 'lk' | 'lj'}) {
         const extraData = (popup as any).data as {extender: DerivationExtender, formula: SimpleFormula, inPremises: boolean};
         let output: OutputEvent;
         if(event.target === contractBtn) {
-            //output = classicalSequentCalculus(new Contract(extraData.extender.goal, extraData.formula, extraData.inPremises));
             output = logic(new Contract(extraData.extender.goal, extraData.formula, extraData.inPremises));
         } else { // termBtn was clicked or termInput changed, either way do the same thing
             const termString: string = (termInput as any).value;
@@ -1574,12 +1572,11 @@ export function main(options : {logic: 'lk' | 'lj'}) {
             if(term === null) {
                 output = new Failed(`Failed to parse term: ${termString}`);
             } else {
-                //output = classicalSequentCalculus(new Instantiate(extraData.extender.goal, extraData.formula, extraData.inPremises, term));
                 output = logic(new Instantiate(extraData.extender.goal, extraData.formula, extraData.inPremises, term));
             }
         }
         (termInput as any).value = '';
-        popup.classList.remove(SHOWN_CLASS);
+        popup.className = '';
         example = output.match(
             (message) => {
                 toast.textContent = message;
@@ -1606,7 +1603,7 @@ export function main(options : {logic: 'lk' | 'lj'}) {
     };
 
     const onAnimationEnd = (event: Event) => toast.classList.remove(SHOWN_CLASS);
-    const onMouseLeave = (event: Event) => { (popup as any).data = void(0); popup.classList.remove(SHOWN_CLASS); };
+    const onMouseLeave = (event: Event) => { (popup as any).data = void(0); popup.className = ''; };
     const onHashChange = (event: Event) => { derivationFromHash(); refresh(false); };
     const onLaTeX = (event: Event) => { latex.textContent = example.toLaTeX(true); };
 

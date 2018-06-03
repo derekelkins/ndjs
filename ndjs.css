@@ -71,6 +71,10 @@ a:hover {
     display: block;
 }
 
+.lj #popup.exists #contractBtn {
+    display: none;
+}
+
 #termInput {
     width: 3em;
 }
