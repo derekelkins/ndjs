@@ -60,7 +60,7 @@ const TOP_SYMBOL = '⊤';
 const NOT_SYMBOL = '¬';
 const AND_SYMBOL = '∧';
 const OR_SYMBOL = '∨';
-const IMP_SYMBOL = '⇒';
+const IMP_SYMBOL = '→';
 const FORALL_SYMBOL = '∀';
 const EXISTS_SYMBOL = '∃';
 
@@ -70,7 +70,7 @@ const connectiveToLaTeX: {[conn: string]: string} = {
     [NOT_SYMBOL]: '\\neg{}',
     [AND_SYMBOL]: '\\land{}',
     [OR_SYMBOL]: '\\lor{}',
-    [IMP_SYMBOL]: '\\Rightarrow{}',
+    [IMP_SYMBOL]: '\\to{}',
     [FORALL_SYMBOL]: '\\forall{}',
     [EXISTS_SYMBOL]: '\\exists{}'
 };
@@ -1319,7 +1319,7 @@ const ljCalculus: Logic = (input) => input.match(
             }
         }),
     (goal, formula, inPremises) => {
-        if(!inPremises) new Failed('Can\'t contract right. TODO: Need to make this option inaccessible.');
+        if(!inPremises) throw 'Should never happen.';
         return new NewGoals('CL', [new Goal(goal.premises.concat(formula), goal.consequences)]);
     },
     (goal, formula, inPremises, term) => {
@@ -1466,7 +1466,7 @@ const logics: {[l: string]: Logic} = {
 
 /* Main *************************************************************************************************************************************************************/
 
-export function main(options : {logic: 'lk' | 'lj'}) {
+export function main(containerId: string, options : {logic: 'lk' | 'lj', toLaTeX?: boolean, showInput?: boolean}) {
     const A = predicate('A');
     const B = predicate('B');
     const x = new Var('x');
@@ -1475,26 +1475,22 @@ export function main(options : {logic: 'lk' | 'lj'}) {
     let example: SimpleDerivation = open(entails([], [implies(implies(implies(A, B), A), A)]));
     //let example: SimpleDerivation = open(entails([forall(x, forall(y, predicate('P', variable(x), variable(y))))], [exists(x, exists(y, predicate('P', variable(x), variable(y))))]));
 
-    const container = document.getElementById('container');
-    const toast = document.getElementById('toast');
-    const popup = document.getElementById('popup');
-    const goalInput = document.getElementById('goalInput');
-    const termInput = document.getElementById('termInput');
-    const termBtn = document.getElementById('termBtn');
-    const contractBtn = document.getElementById('contractBtn');
-    const latexBtn = document.getElementById('latexBtn');
-    const latex = document.getElementById('latex');
-    if(container === null) throw 'Container missing.';
-    if(popup === null) throw 'Popup missing.';
-    if(toast === null) throw 'Toast missing.';
-    if(goalInput === null) throw 'Goal Input missing.';
-    if(termInput === null) throw 'Term Input missing.';
-    if(termBtn === null) throw 'Term button missing.';
-    if(contractBtn === null) throw 'Contract button missing.';
-    if(latexBtn === null) throw 'LaTeX button missing.';
-    if(latex === null) throw 'LaTeX container missing.';
+    const container = document.getElementById(containerId);
+    if(container === null) throw `Container missing. Element with ${containerId} not found.`;
 
-    const logic = logics[options.logic];
+    const goalInput = wire()`<input type="text" id="goalInput" value="((A -> B) -> A) -> A"/>`;
+
+    const toast = wire()`<div id="toast"></div>`;
+    const termInput = wire()`<input type="text" id="termInput"/>`;
+    const termBtn = wire()`<button id="termBtn">Go</button>`;
+    const contractBtn = wire()`<button id="contractBtn">Contract</button>`;
+    const popup = wire()`<div id="popup"><div id="popupBody">${[termInput, termBtn, contractBtn]}<p>Enter a term and click Go, or click Contract to perform a contraction.</p></div></div>`;
+
+    const latexBtn = wire()`<button id="latexBtn">LaTeX</button>`;
+    const latex = wire()`<code id="latex"></code>`;
+    const latexContainer = wire()`<div class="${options.toLaTeX ? '' : 'hidden'}">${latexBtn}<pre>${latex}</pre></div>`;
+
+    const logic = options.logic === void(0) ? classicalSequentCalculus : logics[options.logic];
 
     const derivationFromHash = () => {
         try {
@@ -1513,10 +1509,18 @@ export function main(options : {logic: 'lk' | 'lj'}) {
         } catch(SyntaxError) {} // Ignore SyntaxErrors
     };
 
+    const dummy = {};
+
     const refresh = (changeHash: boolean = true) => {
         document.title = 'Proving ' + example.conclusion.toDisplayString(true);
         if(changeHash) location.hash = '#'+compressToEncodedURIComponent(JSON.stringify(cse(example.toJson())));
-        bind(container)`${renderDerivation(example, new StartPath('root.'), new GoalExtender(example.conclusion), true, true)}`;
+        bind(container)`${[
+            wire(dummy, 'goalBox')`<div id="goalBox" class="${options.showInput ? '' : 'hidden'}">Enter goal or formula: ${goalInput}</div>`,
+            toast,
+            wire(dummy, 'wrapper')`<div id="derivationWrapper">${renderDerivation(example, new StartPath('root.'), new GoalExtender(example.conclusion), true, true)}</div>`,
+            popup,
+            latexContainer
+        ]}`;
     };
 
     const SHOWN_CLASS = 'shown';
@@ -1580,7 +1584,7 @@ export function main(options : {logic: 'lk' | 'lj'}) {
             },
             (name, goals) => extraData.extender.extend(name, goals.map(g => new OpenDerivation(g))),
             (goal, formula, inPremises) => {
-                throw "Shouldn't happen"; // Right?
+                throw 'Shouldn\'t happen'; // Right?
             });
         refresh();
     };
@@ -1588,7 +1592,7 @@ export function main(options : {logic: 'lk' | 'lj'}) {
     const onGoalInput = (event: Event) => {
         const goalText: string = (goalInput as any).value;
         const goal = goalFromString(goalText);
-        if(goal === null) {
+        if(goal === null || (options.logic === 'lj' && goal.consequences.length !== 1)) {
             toast.textContent = 'Failed to parse goal.';
             toast.classList.add(SHOWN_CLASS);
         } else {
@@ -1603,6 +1607,7 @@ export function main(options : {logic: 'lk' | 'lj'}) {
     const onLaTeX = (event: Event) => { latex.textContent = example.toLaTeX(true); };
 
     const scheduler = newDefaultScheduler();
+
     runEffects(tap(onClick, click(container, true)), scheduler);
     runEffects(tap(onTermInput, merge(change(termInput), merge(click(termBtn), click(contractBtn)))), scheduler);
     runEffects(tap(onGoalInput, change(goalInput)), scheduler);

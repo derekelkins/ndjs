@@ -11,17 +11,28 @@ a:hover {
     background-color: lightgray;
 }
 
-#goalBox {
+.hidden {
+    display: none;
+}
+
+#preamble {
     text-align: center;
     margin: 0 auto;
     margin-top: 2em;
     width: 100%;
 }
 
-#container {
+#goalBox {
+    text-align: center;
+    margin: 0 auto;
+    width: 100%;
+}
+
+#derivationWrapper {
     text-align: center;
     margin: 0 auto;
     padding-top: 2em;
+    padding-bottom: 2em;
     width: 100%;
     overflow-x: auto;
     white-space: nowrap;
